@@ -1,0 +1,129 @@
+{% extends 'base.html' %}
+{% block title %}Add Stock{% endblock %}
+{% block content %}
+<h2 class="text-center mb-4">Add Stock</h2>
+
+<!-- Live Search and Filters -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <label>Enter Barcode</label>
+        <input type="text" id="barcode-input" class="form-control" placeholder="Enter barcode..." oninput="checkBarcode()">
+    </div>
+    <div class="col-md-6">
+        <label>Search Product (Name or Code)</label>
+        <input type="text" id="search-input" class="form-control" placeholder="Type to search..." oninput="liveSearch()">
+        <ul id="search-results" class="list-group mt-2" style="display: none;">
+            <!-- Search results will be dynamically inserted here -->
+        </ul>
+    </div>
+</div>
+
+<!-- Stock Card -->
+<div id="product-card" class="row mb-4" style="display: none;">
+    <div class="col-md-12">
+        <div class="card flex-md-row">
+            <img id="product-image" class="card-img-left img-fluid" style="width: 150px; height: 150px; object-fit: cover;" alt="Product Image">
+            <div class="card-body">
+                <h5 id="product-name" class="card-title"></h5>
+                <p id="product-details" class="card-text mb-2"></p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Stock Form -->
+<form method="POST" id="add-stock-form" style="display: none;">
+    <div class="mb-3">
+        <label>Number of Bottles</label>
+        <input type="number" name="quantity" class="form-control" required>
+    </div>
+    <button type="submit" class="btn btn-primary">Add Stock</button>
+</form>
+
+<script>
+// Function to check barcode and auto-select product
+function checkBarcode() {
+    const barcodeInput = document.getElementById('barcode-input').value.trim();
+    const products = JSON.parse('{{ products | tojson }}');
+    const matchedProduct = products.find(product => product.barcode === barcodeInput);
+
+    if (matchedProduct) {
+        selectProduct(matchedProduct);
+        document.getElementById('search-input').value = ''; // Clear search input
+        document.getElementById('search-results').style.display = 'none'; // Hide search results
+    }
+}
+
+// Function to perform live search
+function liveSearch() {
+    const searchInput = document.getElementById('search-input').value.toLowerCase();
+    const resultsList = document.getElementById('search-results');
+    resultsList.innerHTML = ''; // Clear previous results
+
+    if (searchInput.trim() === '') {
+        resultsList.style.display = 'none';
+        return;
+    }
+
+    const products = JSON.parse('{{ products | tojson }}'); // Load products from backend
+    let matches = products.filter(product =>
+        product.brand_name.toLowerCase().includes(searchInput) ||
+        product.brand_code.toLowerCase().includes(searchInput)
+    );
+
+    if (matches.length > 0) {
+        matches.forEach(product => {
+            const listItem = document.createElement('li');
+            listItem.className = 'list-group-item list-group-item-action';
+            listItem.textContent = `${product.brand_name} ${product.brand_type} ${product.brand_size}`;
+            listItem.onclick = () => selectProduct(product);
+            resultsList.appendChild(listItem);
+        });
+        resultsList.style.display = 'block';
+    } else {
+        resultsList.style.display = 'none';
+    }
+}
+
+// Function to handle product selection
+function selectProduct(product) {
+    const productCard = document.getElementById('product-card');
+    const productImage = document.getElementById('product-image');
+    const productName = document.getElementById('product-name');
+    const productDetails = document.getElementById('product-details');
+    const form = document.getElementById('add-stock-form');
+
+    const name = `${product.brand_name} ${product.brand_type} ${product.brand_size}ml`;
+    const detailsHTML = `
+        <p><strong>Brand Code:</strong> ${product.brand_code}</p>
+        <p><strong>Barcode:</strong> ${product.barcode}</p>
+        <p><strong>MRP:</strong> ₹${product.mrp}</p>
+        <p><strong>Selling Price:</strong> ₹${product.selling_price}</p>
+    `;
+
+    productName.textContent = name;
+    productDetails.innerHTML = detailsHTML;
+
+    // Set image
+    if (product.image_path) {
+        const imageUrl = "{{ url_for('static', filename='uploads/') }}" + product.image_path.split('/').pop();
+        productImage.src = imageUrl;
+        productImage.alt = "Product Image";
+    } else {
+        productImage.src = "";
+        productImage.alt = "No Image Available";
+    }
+
+    // Set selected product ID in the form
+    const productIdInput = document.createElement('input');
+    productIdInput.type = 'hidden';
+    productIdInput.name = 'product_id';
+    productIdInput.value = product.id;
+    form.appendChild(productIdInput);
+
+    productCard.style.display = 'flex'; // Show the product card
+    form.style.display = 'block'; // Show the form
+}
+</script>
+
+{% endblock %}

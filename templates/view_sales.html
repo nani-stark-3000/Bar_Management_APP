@@ -1,0 +1,119 @@
+{% extends 'base.html' %}
+{% block title %}View Sales{% endblock %}
+{% block content %}
+<h2 class="text-center mb-4">Sales Management</h2>
+
+<!-- Search and Date Filters -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <label>Search Product (Name or Brand Code)</label>
+        <input type="text" id="search-input" class="form-control" placeholder="Type to search..." oninput="applyFilters()">
+    </div>
+    <div class="col-md-3">
+        <label>Start Date</label>
+        <input type="date" id="start-date" class="form-control" onchange="applyFilters()">
+    </div>
+    <div class="col-md-3">
+        <label>End Date</label>
+        <input type="date" id="end-date" class="form-control" onchange="applyFilters()">
+    </div>
+</div>
+
+<!-- Sales Cards -->
+<div class="container">
+    <div id="sales-list" class="row">
+        {% for sale in sales %}
+        <div class="col-12 mb-3 sale-card" 
+             data-name="{{ sale.brand_name | lower }}" 
+             data-code="{{ sale.brand_code | lower }}" 
+             data-date="{{ sale.date_sold.split(' ')[0] }}">
+            <div class="card flex-md-row align-items-center px-3 py-3" style="width: 100%;">
+                <div class="row w-100">
+                    <!-- Column 1: Item Name and Brand Code -->
+                    <div class="col-md-3 col-sm-6 mb-2 mb-md-0">
+                        <h5 class="card-title">
+                            {{ sale.brand_name }} {{ sale.brand_type }} {{ sale.brand_size }}ml
+                        </h5>
+                        <p class="card-text mb-0">
+                            <strong>Brand Code:</strong> {{ sale.brand_code }}
+                        </p>
+                    </div>
+
+                    <!-- Column 2: Quantity and Sold By -->
+                    <div class="col-md-3 col-sm-6 mb-2 mb-md-0">
+                        <p class="card-text mb-0">
+                            <strong>Quantity Sold:</strong> {{ sale.quantity }}
+                        </p>
+                        <p class="card-text mb-0">
+                            <strong>Sold By:</strong> {{ sale.seller }}
+                        </p>
+                    </div>
+
+                    <!-- Column 3: Date and Time -->
+                    <div class="col-md-3 col-sm-6 mb-2 mb-md-0">
+                        <p class="card-text mb-0">
+                            <strong>Date:</strong> {{ sale.date_sold.split(' ')[0] }}
+                        </p>
+                        <p class="card-text mb-0">
+                            <strong>Time:</strong> {{ sale.date_sold.split(' ')[1] | to12hr }}
+                        </p>
+                    </div>
+
+                    <!-- Column 4: Action -->
+                    <div class="col-md-3 col-sm-6 text-md-end text-sm-start">
+                        <button class="btn btn-danger btn-sm" onclick="revokeSale({{ sale.id }})">
+                            <i class="fas fa-undo"></i> Revoke
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+// Function to revoke a sale
+function revokeSale(saleId) {
+    if (!confirm("Are you sure you want to revoke this sale?")) return;
+
+    fetch('/admin/revoke-sale', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sale_id: saleId }),
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.message) {
+            alert(data.message);
+            location.reload(); // Reload the page to update the sales list
+        } else {
+            alert(data.error || "Failed to revoke sale");
+        }
+    });
+}
+
+// Apply filters based on search input and date range
+function applyFilters() {
+    const searchInput = document.getElementById('search-input').value.toLowerCase();
+    const startDate = document.getElementById('start-date').value;
+    const endDate = document.getElementById('end-date').value;
+    const saleCards = document.querySelectorAll('.sale-card');
+
+    saleCards.forEach(card => {
+        const name = card.getAttribute('data-name');
+        const code = card.getAttribute('data-code');
+        const date = card.getAttribute('data-date');
+
+        const matchesSearch = (!searchInput || name.includes(searchInput) || code.includes(searchInput));
+        const matchesDate = (!startDate || !endDate || (date >= startDate && date <= endDate));
+
+        if (matchesSearch && matchesDate) {
+            card.style.display = 'block';
+        } else {
+            card.style.display = 'none';
+        }
+    });
+}
+</script>
+{% endblock %}

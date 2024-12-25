@@ -1,0 +1,11 @@
+{% extends 'base.html' %}
+{% block title %}Salesman Dashboard{% endblock %}
+{% block sidebar %}
+    <a href="{{ url_for('sale_management') }}" class="nav-link"><i class="fas fa-shopping-cart"></i><span>Sale Management</span></a>
+    <a href="{{ url_for('view_sales') }}" class="nav-link"><i class="fas fa-chart-line"></i><span>View Sales</span></a>
+    <a href="{{ url_for('daily_report') }}" class="nav-link"><i class="fas fa-file-alt"></i><span>Daily Report</span></a>
+{% endblock %}
+{% block content %}
+    <h2>Salesman Dashboard</h2>
+    <p>Welcome, Salesman! Record your sales here.</p>
+{% endblock %}

@@ -1,0 +1,123 @@
+{% extends 'base.html' %}
+{% block title %}View Stock{% endblock %}
+{% block content %}
+<h2 class="text-center mb-4">Available Stock</h2>
+
+<!-- Live Search and Filters -->
+<div class="row mb-4">
+    <div class="col-md-4">
+        <label>Search Product (Name or Code)</label>
+        <input type="text" id="search-input" class="form-control" placeholder="Type to search..." oninput="liveSearch()">
+        <ul id="search-results" class="list-group mt-2" style="display: none;">
+            <!-- Search results will be dynamically inserted here -->
+        </ul>
+    </div>
+    <div class="col-md-3">
+        <label>Filter by Type</label>
+        <select id="type-filter" class="form-control" onchange="applyFilters()">
+            <option value="">All Types</option>
+            {% for type in filters.types %}
+            <option value="{{ type }}">{{ type }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-md-3">
+        <label>Filter by Size</label>
+        <select id="size-filter" class="form-control" onchange="applyFilters()">
+            <option value="">All Sizes</option>
+            {% for size in filters.sizes %}
+            <option value="{{ size }}">{{ size }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-md-2">
+        <label>Filter by MRP Range</label>
+        <select id="mrp-filter" class="form-control" onchange="applyFilters()">
+            <option value="">All</option>
+            <option value="0-100">0-100</option>
+            <option value="100-500">100-500</option>
+            <option value="500-1000">500-1000</option>
+            <option value="1000-2000">1000-2000</option>
+            <option value="2000+">2000+</option>
+        </select>
+    </div>
+</div>
+
+<!-- Stock Grid -->
+<div id="stock-grid" class="row">
+    {% for product in products %}
+    <div class="col-md-12 mb-3 product-card" data-type="{{ product.brand_type }}" data-size="{{ product.brand_size }}" data-mrp="{{ product.mrp }}">
+        <div class="card flex-md-row align-items-center">
+            <img src="{{ url_for('static', filename='uploads/' + product.image_path.split('/')[-1]) }}" class="card-img-left img-fluid" alt="Product Image" style="width: 150px; height: 150px; object-fit: cover;">
+            <div class="card-body">
+                <h5 class="card-title">{{ product.brand_name }} {{ product.brand_type }} {{ product.brand_size }}ml</h5>
+                <p class="card-text mb-2">
+                    <strong>Brand Code:</strong> {{ product.brand_code }}<br>
+                    <strong>Barcode:</strong> {{ product.barcode }}
+                </p>
+            </div>
+            <div class="card-body text-center">
+                <p class="card-text mb-0">
+                    <strong>Invoice Rate:</strong> ₹{{ product.invoice_rate }}<br>
+                    <strong>MRP:</strong> ₹{{ product.mrp }}<br>
+                    <strong>Selling Price:</strong> ₹{{ product.selling_price }}
+                </p>
+            </div>
+            <div class="card-body text-end">
+                <p class="card-text mb-0" style="font-size: 2rem;">
+                    <strong>Total Stock:</strong> {{ product.total_stock or 0 }}
+                </p>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<script>
+// Load products
+const products = JSON.parse('{{ products | tojson }}');
+
+// Live Search Functionality
+function liveSearch() {
+    const searchInput = document.getElementById('search-input').value.toLowerCase();
+    const productCards = document.querySelectorAll('.product-card');
+
+    productCards.forEach(card => {
+        const name = card.querySelector('.card-title').textContent.toLowerCase();
+        const code = card.querySelector('.card-text').textContent.toLowerCase();
+        if (name.includes(searchInput) || code.includes(searchInput)) {
+            card.style.display = '';
+        } else {
+            card.style.display = 'none';
+        }
+    });
+}
+
+// Filter Functionality
+function applyFilters() {
+    const typeFilter = document.getElementById('type-filter').value;
+    const sizeFilter = document.getElementById('size-filter').value;
+    const mrpFilter = document.getElementById('mrp-filter').value;
+    const productCards = document.querySelectorAll('.product-card');
+
+    productCards.forEach(card => {
+        const type = card.getAttribute('data-type');
+        const size = card.getAttribute('data-size');
+        const mrp = parseFloat(card.getAttribute('data-mrp'));
+
+        const matchesType = !typeFilter || type === typeFilter;
+        const matchesSize = !sizeFilter || size === sizeFilter;
+        const matchesMRP =
+            !mrpFilter ||
+            (mrpFilter === '2000+' && mrp > 2000) ||
+            (mrp >= parseInt(mrpFilter.split('-')[0]) && mrp <= parseInt(mrpFilter.split('-')[1]));
+
+        if (matchesType && matchesSize && matchesMRP) {
+            card.style.display = '';
+        } else {
+            card.style.display = 'none';
+        }
+    });
+}
+</script>
+{% endblock %}

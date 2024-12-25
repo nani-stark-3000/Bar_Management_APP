@@ -1,0 +1,362 @@
+<!-- barcode
+search by name or code
+sale list => 
+accept / reject -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <style>
+
+        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&family=Open+Sans:ital,wght@0,300..800;1,300..800&family=Public+Sans:ital,wght@0,100..900;1,100..900&display=swap');
+
+        *{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        .container{
+            width: 100%;
+            height: 100vh;
+            font-family: "Public Sans";
+            display: grid;
+            grid-template-columns: 0.18fr 1fr;
+        }
+
+        .nav{
+            border-right: 2px solid #e1e1e15e;
+            background: #f6f6f6;
+            padding: 20px;
+        }
+
+        .section{
+            padding: 20px;
+        }
+
+        .section .title{
+            font-weight: 600;
+            font-size: 20px;
+            margin-bottom: 3px;
+        }
+
+        .input-container{
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .input-container .irow{
+            width: 100%;
+            display: flex;
+            gap: 10px;
+        }
+
+        .input-container .irow .cam{
+            width: 40px;
+            height: 40px;
+            border: 2px solid #c2c2c23d;
+            background: transparent;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border-radius: 5px;
+            font-size: 20px;
+            color: #303030;
+            background: #c2c2c23d;
+        }
+
+        .input-container .inp{
+            width: 100%;
+            height: 40px;
+            border-radius: 5px;
+            font-family: "Public Sans";
+            padding: 0 10px;
+            border: 2px solid #c2c2c23d;
+            outline: none;
+        }
+
+        .header{
+            width: 100%;
+            height: max-content;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .table .data .del,
+        .header .lgt {
+            height: 30px;
+            width: max-content;
+            padding: 0 15px;
+            border: none;
+            color: white;
+            background: red;
+            border-radius: 5px;
+            font-family: "Public Sans";
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .section .sub{
+            font-size: 15px;
+            font-weight: 600;
+            margin-top: 30px;
+            color: #383838;
+        }
+
+        .table{
+            width: 100%;
+            height: max-content;
+            margin-top: 10px;
+            border-collapse: collapse;
+            font-family: "Public Sans";
+            user-select: none;
+        }
+
+        .table .head{
+            text-align: center;
+            border: 2px solid #e1e1e15e;
+            height: 40px;
+            font-weight: 600;
+            font-size: 13px;
+            text-transform: capitalize;
+            color: #4e4e4e;
+            background: #e1e1e13e;
+        }
+        
+        .table .data{
+            text-transform: capitalize;
+            text-align: center;
+            height: 40px;
+            font-size: 14px;
+            border: 2px solid #e1e1e15e;
+        }
+
+        .table .data .logo{
+            width: auto;
+            height: 60px;
+        }
+
+        .btnList{
+            margin-top: 20px;
+            display: flex;
+            gap: 15px;
+        }
+
+        .btnList .btn{
+            width: auto;
+            height: 28px;
+            border-radius: 5px;
+            color: white;
+            font-size: 12px;
+            padding: 0 10px;
+            background: #4744ff;
+            cursor: pointer;
+            font-family: "Public Sans";
+            border: none;
+        }
+
+        .btnList .btn.rej{
+            background: red;
+        }
+
+        .backface{
+            display: none;
+        }
+        
+        
+        @media only screen and (max-width: 1024px){
+            .backface{
+                width: 100%;
+                height: 100vh;
+                position: fixed;
+                top: 0%;
+                left: 0;
+                background: #00000039;
+                display: none;
+                justify-content: center;
+                align-items: center;
+                z-index: 4;
+            }
+    
+            .backface .popup{
+                width: 90%;
+                height: 90%;
+                background: white;
+                border-radius: 10px;
+                padding: 20px;
+                font-family: "Public Sans";
+                position: relative;
+                box-shadow: 0 0 15px rgba(0, 0, 0, 0.063);
+            }
+            
+            .backface .popup video{
+                width: 100%;
+                height: 100%;
+                border-radius: 5px;
+                background: black;
+            }
+
+            .backface .popup .cpt{
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                background-color: white;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 20px;
+                border: none;
+                color: #292929;
+                position: absolute;
+                left: 50%;
+                bottom: 40px;
+                transform: translateX(-50%);
+            }
+
+            .backface .popup .cls{
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                background-color: white;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 20px;
+                border: none;
+                color: #292929;
+                position: absolute;
+                top: -10px;
+                right: -10px;
+                box-shadow: 0 0 10px rgba(0, 0, 0, 0.212);
+            }
+
+            .nav{
+                display: none;
+            }
+            .container{
+                display: flex;
+                height: 100vh;
+            }
+            .section{
+                width: 100%;
+                overflow-x: hidden;
+            }
+
+            .tcont{
+                width: 100%;
+                overflow-x: scroll;
+            }
+
+            .table .data,
+            .table .head{
+                padding: 0 15px;
+            }
+        }
+
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <!-- temporary tag -->
+            <p style="font-family: Public Sans; font-size: 13px;">Navigation panel</p>
+        </div>
+        <div class="section">
+
+            <!-- popup start -->
+            <div class="backface" id="popup">
+                <div class="popup">
+                    <button class="cls" onclick="closeCamera()"><ion-icon name="close-outline"></ion-icon></button>
+                    <video autoplay id="video"></video>
+                    <button class="cpt">
+                        <ion-icon name="camera"></ion-icon>
+                    </button>
+                </div>
+            </div>
+            <!-- popup end -->
+
+            <div class="header">
+                <p class="title">Point of <span>Sale</span></p>
+                <button class="lgt">Logout</button>
+            </div>
+            
+            <div class="input-container">
+                <div class="irow">
+                    <input type="text" placeholder="Barcode" class="inp">
+                    <button class="cam" onclick="startCapture()">
+                        <ion-icon name="barcode-outline"></ion-icon>
+                    </button>
+                </div>
+                <input type="text" placeholder="Search by name/code" class="inp">
+            </div>
+            <!-- product, barcode, brandcode, price/piece, quantity, image/logo, action => remove -->
+            <p class="sub">Selected Items</p>
+            <div class="tcont">
+                <table class="table">
+                    <tr class="row">
+                        <th class="head">S.no</th>
+                        <th class="head">Product</th>
+                        <th class="head">Brandcode</th>
+                        <th class="head">barcode</th>
+                        <th class="head">Price <span>/unit</span></th>
+                        <th class="head">Quantity</th>
+                        <th class="head">Logo</th>
+                        <th class="head">Action</th>
+                    </tr>
+                    <tr class="row">
+                        <td class="data">01</td> 
+                        <td class="data">Whisky</td>
+                        <td class="data">1234</td>
+                        <td class="data">212312936487</td>
+                        <td class="data">200</td>
+                        <td class="data">1</td>
+                        <td class="data">
+                            <img src="./logo.png" class="logo" alt="">
+                        </td>
+                        <td class="data">
+                            <button class="del">Remove</button>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            <div class="btnList">
+                <button class="btn">Accept</button>
+                <button class="btn rej">Reject</button>
+            </div>
+        </div>
+    </div>
+    <script type="module" src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.esm.js"></script>
+    <script nomodule src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.js"></script>
+    <script>
+        const video = document.getElementById("video");
+        const popup = document.getElementById("popup");
+
+        let stream; 
+
+        const startCapture = () => {
+            popup.style.display = "flex";
+            navigator.mediaDevices.getUserMedia({ video: true }).then((mediaStream) => {
+                stream = mediaStream;
+                video.srcObject = stream;
+            }).catch((err) => console.log(err));
+        };
+
+        const closeCamera = () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            video.srcObject = null; 
+            popup.style.display = "none"; 
+        };
+
+
+    </script>
+</body>
+</html>

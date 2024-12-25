@@ -1,0 +1,128 @@
+{% extends 'base.html' %}
+{% block title %}Stock History{% endblock %}
+{% block content %}
+<h2 class="text-center mb-4">Stock History</h2>
+
+<div id="filters" class="row mb-4">
+    <div class="col-md-4">
+        <label>Search Product (Name or Code)</label>
+        <input type="text" id="search-input" class="form-control" placeholder="Type to search..." oninput="liveSearch()">
+        <ul id="search-results" class="list-group mt-2" style="display: none;"></ul>
+    </div>
+    <div class="col-md-4">
+        <label>Filter by Date</label>
+        <input type="date" id="date-filter" class="form-control" onchange="applyFilters()">
+    </div>
+    <!-- <div class="col-md-4">
+        <label>Filter by Month</label>
+        <input type="month" id="month-filter" class="form-control" onchange="applyFilters()">
+    </div> -->
+</div>
+
+
+<!-- Stock History Cards -->
+<div id="stock-history" class="container-fluid">
+    <div class="row">
+        {% for history in stock_history %}
+        <div class="col-12 mb-4">
+            <div class="card" style="width: 100%; display: flex; flex-direction: row; align-items: center;">
+                <!-- Product Details -->
+                <div class="card-body" style="flex-grow: 1;">
+                    <h5 class="card-title mb-3">{{ history.brand_name }} {{ history.brand_type }} {{ history.brand_size }}ml</h5>
+                    <p class="card-text mb-1">
+                        <strong>Brand Code:</strong> {{ history.brand_code }}<br>
+                        <strong>Barcode:</strong> {{ history.barcode }}<br>
+                    </p>
+                </div>
+
+                <!-- Quantity and Date Section -->
+                <div class="card-body text-center" style="flex-grow: 1;">
+                    <h5 class="card-title mb-3">
+                        <strong>Quantity Added:</strong> {{ history.quantity }}
+                    </h5>
+                    <p class="card-text mb-1">
+                        <strong>Date:</strong> {{ history.date_added.split(' ')[0] }}<br>
+                        <strong>Time:</strong> {{ history.date_added.split(' ')[1] | to12hr }}
+                    </p>
+                </div>
+
+                <!-- Added By and Revoke Section -->
+                <div class="card-body text-end" style="flex-grow: 1;">
+                    <p class="card-text mb-1">
+                        <strong>Added By:</strong> {{ history.added_by }}
+                    </p>
+                    <form method="POST" action="{{ url_for('revoke_stock', id=history.id) }}">
+                        <button type="submit" class="btn btn-danger btn-sm">
+                            <i class="fas fa-undo"></i> Revoke
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+// Load stock history
+const stockHistories = JSON.parse('{{ stock_history | tojson }}');
+
+// Live Search Functionality
+function liveSearch() {
+    const searchInput = document.getElementById('search-input').value.toLowerCase();
+    const historyCards = document.querySelectorAll('.card');
+
+    historyCards.forEach(card => {
+        const name = card.querySelector('.card-title').textContent.toLowerCase();
+        const code = card.querySelector('.card-text').textContent.toLowerCase();
+        if (name.includes(searchInput) || code.includes(searchInput)) {
+            card.parentElement.style.display = 'block';
+        } else {
+            card.parentElement.style.display = 'none';
+        }
+    });
+}
+
+// Revoke Stock Functionality
+function revokeStock(productId, historyId) {
+    if (confirm("Are you sure you want to revoke this stock addition?")) {
+        fetch(`/admin/revoke-stock`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ product_id: productId, history_id: historyId })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.message) {
+                alert(data.message);
+                location.reload();
+            } else {
+                alert(data.error || 'Failed to revoke stock addition.');
+            }
+        });
+    }
+}
+
+// Apply Filters Functionality
+function applyFilters() {
+    const dateFilter = document.getElementById('date-filter').value;
+    const monthFilter = document.getElementById('month-filter').value;
+    const productCards = document.querySelectorAll('.card');
+
+    productCards.forEach(card => {
+        const dateAdded = card.getAttribute('data-date'); // Expected format: YYYY-MM-DD
+        const [year, month, day] = dateAdded.split('-');
+        const matchesDate = !dateFilter || dateAdded === dateFilter;
+        const matchesMonth = !monthFilter || `${year}-${month}` === monthFilter;
+
+        if (matchesDate && matchesMonth) {
+            card.style.display = '';
+        } else {
+            card.style.display = 'none';
+        }
+    });
+}
+</script>
+{% endblock %}

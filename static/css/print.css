@@ -1,0 +1,13 @@
+@media print {
+    body {
+        font-size: 10pt; /* Smaller font for printing */
+    }
+    .table {
+        width: 100%;
+        border-collapse: collapse; /* Ensure borders are printed */
+    }
+    /* Hide elements not needed for printing */
+    .no-print {
+        display: none;
+    }
+}

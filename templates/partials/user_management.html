@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+{% block title %}User Management{% endblock %}
+{% block content %}
+<h2>User Management</h2>
+
+<!-- List Existing Users -->
+<table class="table table-bordered">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Username</th>
+            <th>Role</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for user in users %}
+        <tr>
+            <td>{{ user.id }}</td>
+            <td>{{ user.username }}</td>
+            <td>{{ user.role }}</td>
+            <td>
+                <!-- Delete User -->
+                <form method="POST" action="{{ url_for('delete_user', id=user.id) }}" class="d-inline">
+                    <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<hr>
+
+<!-- Registration Form -->
+<h3>Register New User</h3>
+<form method="POST" action="{{ url_for('add_user') }}">
+    <div class="mb-3">
+        <label>Username</label>
+        <input type="text" name="username" class="form-control" required>
+    </div>
+    <div class="mb-3">
+        <label>Password</label>
+        <input type="password" name="password" class="form-control" required>
+    </div>
+    <div class="mb-3">
+        <label>Role</label>
+        <select name="role" class="form-control" required>
+            <option value="Admin">Admin</option>
+            <option value="Supervisor">Supervisor</option>
+            <option value="Salesman">Salesman</option>
+        </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Register</button>
+</form>
+
+{% endblock %}

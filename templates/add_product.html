@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% block title %}Add New Product{% endblock %}
+{% block content %}
+<h2>Add New Product</h2>
+<a href="{{ url_for('export_products') }}" class="btn btn-success">Export Products</a>
+<a href="{{ url_for('import_products') }}" class="btn btn-primary">Import Products</a>
+<form method="POST" enctype="multipart/form-data">
+    <div class="mb-3">
+        <label>Brand Name</label>
+        <input type="text" name="brand_name" class="form-control" required>
+    </div>
+    <div class="mb-3">
+        <label>Brand Code</label>
+        <input type="text" name="brand_code" class="form-control" required>
+    </div>
+    <div class="mb-3">
+        <label>Barcode</label>
+        <input type="text" name="barcode" class="form-control" required>
+    </div>
+    <div class="mb-3">
+        <label>Invoice Rate</label>
+        <input type="number" name="invoice_rate" class="form-control" step="0.01" required>
+    </div>
+    <div class="mb-3">
+        <label>MRP</label>
+        <input type="number" name="mrp" class="form-control" step="0.01" required>
+    </div>
+    <div class="mb-3">
+        <label>Selling Price</label>
+        <input type="number" name="selling_price" class="form-control" step="0.01" required>
+    </div>
+    <div class="mb-3">
+        <label>Brand Type</label>
+        <input type="text" name="brand_type" class="form-control" required>
+    </div>
+    <div class="mb-3">
+        <label>Brand Size</label>
+        <input type="text" name="brand_size" class="form-control" required>
+    </div>
+    <div class="mb-3">
+        <label>Product Image</label>
+        <input type="file" name="image" class="form-control">
+    </div>
+    <button type="submit" class="btn btn-primary">Add Product</button>
+</form>
+{% endblock %}

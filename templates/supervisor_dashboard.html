@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block title %}Supervisor Dashboard{% endblock %}
+{% block sidebar %}
+    <a href="{{ url_for('add_product') }}" class="nav-link"><i class="fas fa-plus-circle"></i><span>Add Product</span></a>
+    <a href="{{ url_for('view_products') }}" class="nav-link"><i class="fas fa-list"></i><span>View Products</span></a>
+    <a href="{{ url_for('add_stock') }}" class="nav-link"><i class="fas fa-boxes"></i><span>Add Stock</span></a>
+    <a href="{{ url_for('view_stock') }}" class="nav-link"><i class="fas fa-warehouse"></i><span>View Stock</span></a>
+    <a href="{{ url_for('sale_management') }}" class="nav-link"><i class="fas fa-shopping-cart"></i><span>Sale Management</span></a>
+    <a href="{{ url_for('view_sales') }}" class="nav-link"><i class="fas fa-chart-line"></i><span>View Sales</span></a>
+    <a href="{{ url_for('daily_report') }}" class="nav-link"><i class="fas fa-file-alt"></i><span>Daily Report</span></a>
+{% endblock %}
+{% block content %}
+    <h2>Supervisor Dashboard</h2>
+    <p>Welcome, Supervisor! Manage your tasks here.</p>
+{% endblock %}
