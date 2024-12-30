@@ -3,4 +3,136 @@
 {% block content %}
     <h2>Admin Dashboard</h2>
     <p>Welcome, Admin! Manage your application here.</p>
+    <div class="container-fluid">
+        <!-- Top Cards -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">Today's Sale</h5>
+                        <p class="card-text" id="todays-sale">₹0</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">Total Profit</h5>
+                        <p class="card-text" id="todays-profit">₹0</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">Sale Summary</h5>
+                        <p class="card-text" id="sale-summary">0 Products, 0 Bottles</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">Stock Added</h5>
+                        <p class="card-text" id="stock-added">0 Bottles</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <h4>Sale History</h4>
+                <select id="brand-selector" class="form-control mb-3">
+                    <option value="">Select Brand</option>
+                    {% for brand in brands %}
+                    <option value="{{ brand }}">{{ brand }}</option>
+                    {% endfor %}
+                </select>
+                <canvas id="saleHistoryChart"></canvas>
+            </div>
+        </div>
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <h4>Most Selling Products</h4>
+                <canvas id="mostSellingChart"></canvas>
+            </div>
+        </div>        
+    
+    <script>
+    // Sale History Chart Logic
+    const saleHistoryCtx = document.getElementById('saleHistoryChart').getContext('2d');
+    let saleHistoryChart;
+
+    document.getElementById('brand-selector').addEventListener('change', function () {
+        const brand = this.value;
+
+        if (!brand) {
+            alert('Please select a brand to view sales history.');
+            return;
+        }
+
+        fetch(`/dashboard/sale-history?brand_name=${brand}&time_frame=day`)
+            .then(res => res.json())
+            .then(data => {
+                if (!data.data.length) {
+                    alert(data.message || "No sales data available.");
+                    return;
+                }
+
+                const labels = data.data.map(item => item.date);
+                const datasets = {};
+
+                // Prepare datasets grouped by size
+                data.data.forEach(item => {
+                    if (!datasets[item.size]) {
+                        datasets[item.size] = { label: item.size, data: [], backgroundColor: randomColor() };
+                    }
+                    datasets[item.size].data.push(item.quantity);
+                });
+
+                if (saleHistoryChart) saleHistoryChart.destroy();
+                saleHistoryChart = new Chart(saleHistoryCtx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: Object.values(datasets)
+                    }
+                });
+            });
+    });
+
+    // Most Selling Products Chart Logic
+    const mostSellingCtx = document.getElementById('mostSellingChart').getContext('2d');
+
+    fetch('/dashboard/most-selling')
+        .then(res => res.json())
+        .then(data => {
+            if (!data.data.length) {
+                alert(data.message || "No most-selling data available.");
+                return;
+            }
+
+            const labels = data.data.map(item => item.brand_name);
+            const avgBottles = data.data.map(item => item.avg_bottles_per_day);
+
+            new Chart(mostSellingCtx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Average Bottles Per Day',
+                        data: avgBottles,
+                        backgroundColor: 'green'
+                    }]
+                }
+            });
+        });
+
+    // Utility to Generate Random Colors
+    function randomColor() {
+        return `#${Math.floor(Math.random() * 16777215).toString(16)}`;
+    }
+
+    </script>
 {% endblock %}

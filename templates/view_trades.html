@@ -1,0 +1,121 @@
+{% extends 'base.html' %}
+{% block title %}Trade Stock{% endblock %}
+
+{% block content %}
+<h2 class="text-center mb-4">Trade Stock</h2>
+
+<!-- Trade Form -->
+<div class="card mb-4">
+    <div class="card-body">
+        <h5 class="card-title">Add Trade Record</h5>
+        <form id="trade-form" method="POST" action="{{ url_for('trade_stock') }}">
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label for="product">Product</label>
+                    <select id="product" name="product_id" class="form-control" required>
+                        <option value="" disabled selected>Select Product</option>
+                        {% for product in products %}
+                        <option value="{{ product.id }}">
+                            {{ product.brand_name }} - {{ product.brand_type }} - {{ product.brand_size }}ml
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>                
+                <div class="col-md-6 mb-3">
+                    <label for="bar-name">Bar/Person Name</label>
+                    <input type="text" id="bar-name" name="bar_name" class="form-control" placeholder="Enter bar/person name" required>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label for="quantity">Quantity</label>
+                    <input type="number" id="quantity" name="quantity" class="form-control" placeholder="Enter quantity" required>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label for="trade-type">Trade Type</label>
+                    <select id="trade-type" name="trade_type" class="form-control" required>
+                        <option value="" disabled selected>Select Type</option>
+                        <option value="borrow">Borrow</option>
+                        <option value="lend">Lend</option>
+                    </select>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label for="person-name">Handled By</label>
+                    <input type="text" id="person-name" name="person_name" class="form-control" placeholder="Enter your name" required>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Add Trade</button>
+        </form>
+    </div>
+</div>
+
+<!-- Trade Records -->
+<h5 class="mb-3">Trade Records</h5>
+<div id="trade-records">
+    <div class="row">
+        {% for trade in trades %}
+        <div class="col-12 mb-3">
+            <div class="card" style="width: 100%; display: flex; flex-direction: row; align-items: center;">
+                <!-- Column 1: Product Details -->
+                <div class="card-body" style="flex-grow: 1;">
+                    <h5 class="card-title mb-2">
+                        {{ trade.product_name }} - {{ trade.brand_type }} - {{ trade.brand_size }}ml
+                    </h5>
+                    <p class="card-text mb-0">
+                        <strong>Bar/Person:</strong> {{ trade.bar_name }}<br>
+                        <strong>Trade Type:</strong> {{ trade.trade_type | capitalize }}
+                    </p>
+                </div>
+
+                <!-- Column 2: Quantity and Date -->
+                <div class="card-body text-center" style="flex-grow: 1;">
+                    <p class="card-text mb-0">
+                        <strong>Quantity:</strong> {{ trade.quantity }}<br>
+                        <strong>Date:</strong> {{ trade.date_exchanged.split(' ')[0] }}<br>
+                        <strong>Time:</strong> {{ trade.date_exchanged.split(' ')[1] | to12hr }}
+                    </p>
+                </div>
+
+                <!-- Column 3: Stock Values -->
+                <div class="card-body text-center" style="flex-grow: 1;">
+                    <p class="card-text mb-0">
+                        <strong>Stock Value:</strong> ₹{{ trade.stock_value }}<br>
+                        <strong>MRP Value:</strong> ₹{{ trade.mrp_value }}<br>
+                        <strong>Selling Price Value:</strong> ₹{{ trade.selling_price_value }}
+                    </p>
+                </div>
+
+                <!-- Column 4: Settlement -->
+                <div class="card-body text-end" style="flex-grow: 1;">
+                    <p class="card-text mb-2">
+                        <strong>Settlement:</strong> {{ trade.settlement_status | capitalize }}
+                    </p>
+                    {% if trade.settlement_status == 'pending' %}
+                    <form method="POST" action="{{ url_for('settle_trade', id=trade.id) }}">
+                        <button type="submit" class="btn btn-success btn-sm">
+                            <i class="fas fa-check-circle"></i> Settle
+                        </button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+<script>
+    function settleTrade(tradeId) {
+        if (!confirm('Are you sure you want to settle this trade?')) return;
+    
+        fetch(`/admin/settle-trade/${tradeId}`, { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.message) {
+                    alert(data.message);
+                    location.reload();
+                } else {
+                    alert(data.error || 'Failed to settle trade');
+                }
+            });
+    }
+    
+</script>
+{% endblock %}

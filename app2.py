@@ -2,7 +2,6 @@ from flask import Flask, render_template, request, redirect, url_for, session, j
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func
 from werkzeug.utils import secure_filename
-from werkzeug.security import generate_password_hash, check_password_hash
 import os
 import io
 from datetime import datetime, timedelta, date, time
@@ -10,9 +9,10 @@ import json
 import pandas as pd
 from xhtml2pdf import pisa
 import openpyxl
+from PIL import Image
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key_here'
+app.secret_key = 'New Pavan Restaurant And Bar'
 
 # Database Configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///bar_management.db'
@@ -72,12 +72,26 @@ class Sale(db.Model):
     product = db.relationship('Product', backref=db.backref('sales', lazy=True))
     user = db.relationship('User', backref=db.backref('sales', lazy=True))
 
+class TradeRecord(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
+    bar_name = db.Column(db.String(255), nullable=False)
+    person_name = db.Column(db.String(255), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+    trade_type = db.Column(db.String(50), nullable=False)  # "borrow" or "lend"
+    date_exchanged = db.Column(db.DateTime, default=datetime.utcnow)
+    settlement_status = db.Column(db.String(50), default="pending")
+    stock_value = db.Column(db.Float, nullable=False)  # Invoice rate x Quantity
+    mrp_value = db.Column(db.Float, nullable=False)  # MRP x Quantity
+    selling_price_value = db.Column(db.Float, nullable=False)  # Selling price x Quantity
+    product = db.relationship('Product', backref=db.backref('trade_records', lazy=True))
+
+
 # Default Admin Creation
 with app.app_context():
     db.create_all()
     if not User.query.filter_by(username='admin').first():
-        hashed_password = generate_password_hash('admin123', method='pbkdf2:sha256')
-        admin_user = User(username='admin', password=hashed_password, role='Admin')
+        admin_user = User(username='admin', password='admin123', role='Admin')
         db.session.add(admin_user)
         db.session.commit()
 
@@ -89,7 +103,7 @@ def generate_daily_report_data():
     grand_total_sale = 0  # Grand total across all brand types
 
     products = Product.query.all()
-
+ 
     for product in products:
         if product.brand_type not in report_data:
             report_data[product.brand_type] = {}
@@ -114,7 +128,7 @@ def generate_daily_report_data():
             db.session.query(func.sum(Sale.quantity))
             .filter(
                 Sale.product_id == product.id,
-                Sale.date_sold >= datetime.combine(today, time(2, 0))  # Assuming sales day starts at 2:00 AM
+                Sale.date_sold >= datetime.combine(today, time(0, 0))  # Assuming sales day starts at 2:00 AM
             )
             .scalar()
             or 0
@@ -125,7 +139,7 @@ def generate_daily_report_data():
             db.session.query(func.sum(StockHistory.quantity))
             .filter(
                 StockHistory.product_id == product.id,
-                StockHistory.date_added >= datetime.combine(today, time(2, 0))
+                StockHistory.date_added >= datetime.combine(today, time(0, 0))
             )
             .scalar()
             or 0
@@ -180,7 +194,7 @@ def login():
         username = request.form['username']
         password = request.form['password']
         user = User.query.filter_by(username=username).first()
-        if user and check_password_hash(user.password, password):
+        if user and user.password == password :
             # Store necessary user details in session
             session['user_id'] = user.id
             session['role'] = user.role
@@ -198,6 +212,71 @@ def login():
 
     return render_template('login.html')
 
+@app.route('/dashboard/summary', methods=['GET'])
+def dashboard_summary():
+    today = datetime.now().date()
+
+    # Fetch data for top cards
+    todays_sales = db.session.query(db.func.sum(Sale.total_price)).filter(db.func.date(Sale.date_sold) == today).scalar() or 0
+    todays_profit = db.session.query(
+        db.func.sum((Product.selling_price - Product.invoice_rate) * Sale.quantity)
+    ).join(Sale.product).filter(db.func.date(Sale.date_sold) == today).scalar() or 0
+    total_products_sold = db.session.query(Sale.product_id).filter(db.func.date(Sale.date_sold) == today).distinct().count()
+    total_bottles_sold = db.session.query(db.func.sum(Sale.quantity)).filter(db.func.date(Sale.date_sold) == today).scalar() or 0
+    stock_added = db.session.query(db.func.sum(StockHistory.quantity)).filter(db.func.date(StockHistory.date_added) == today).scalar() or 0
+
+    return jsonify({
+        'todays_sales': todays_sales,
+        'todays_profit': todays_profit,
+        'total_products_sold': total_products_sold,
+        'total_bottles_sold': total_bottles_sold,
+        'stock_added': stock_added
+    })
+
+@app.route('/dashboard/sale-history', methods=['GET'])
+def sale_history():
+    brand_name = request.args.get('brand_name')
+    time_frame = request.args.get('time_frame', 'day')  # 'day' or 'month'
+
+    if not brand_name:
+        return jsonify({'data': [], 'message': 'Please select a brand.'}), 400
+
+    # Adjust time grouping for day or month
+    time_group = db.func.date(Sale.date_sold) if time_frame == 'day' else db.func.strftime('%Y-%m', Sale.date_sold)
+
+    query = db.session.query(
+        time_group.label('date'),
+        Product.brand_size.label('size'),
+        db.func.sum(Sale.quantity).label('quantity')
+    ).join(Sale.product)\
+     .filter(Product.brand_name == brand_name)\
+     .group_by('date', 'size').order_by('date')
+
+    data = [{'date': q.date, 'size': q.size, 'quantity': q.quantity} for q in query]
+
+    if not data:
+        return jsonify({'data': [], 'message': 'No sales data available for the selected brand.'}), 200
+
+    return jsonify({'data': data})
+
+
+@app.route('/dashboard/most-selling', methods=['GET'])
+def most_selling():
+    subquery = db.session.query(
+        Sale.product_id,
+        db.func.count(db.func.date(Sale.date_sold)).label('sale_days')
+    ).group_by(Sale.product_id).subquery()
+
+    query = db.session.query(
+        Product.brand_name,
+        (db.func.sum(Sale.quantity) / db.func.coalesce(subquery.c.sale_days, 1)).label('avg_bottles_per_day')
+    ).join(Sale.product).join(subquery, Sale.product_id == subquery.c.product_id)\
+     .group_by(Product.id).order_by(db.desc('avg_bottles_per_day')).limit(10)
+
+    data = [{'brand_name': q.brand_name, 'avg_bottles_per_day': round(q.avg_bottles_per_day, 2)} for q in query]
+
+    return jsonify({'data': data, 'message': 'Success'})
+
 
 @app.route('/admin/add-user', methods=['POST'])
 def add_user():
@@ -211,11 +290,8 @@ def add_user():
         if existing_user:
             return "Error: Username already exists!", 400
 
-        # Hash the password
-        hashed_password = generate_password_hash(password, method='pbkdf2:sha256')
-
         # Create a new user
-        new_user = User(username=username, password=hashed_password, role=role)
+        new_user = User(username=username, password=password, role=role)
         db.session.add(new_user)
         db.session.commit()
 
@@ -264,7 +340,7 @@ def user_management():
 @app.route('/supervisor/dashboard')
 def supervisor_dashboard():
     if 'role' in session and session['role'] == 'Supervisor':
-        return render_template('supervisor_dashboard.html',session=session)
+        return render_template('sale_management.html',session=session)
     return redirect(url_for('login'))
 
 # Salesman Dashboard
@@ -274,49 +350,70 @@ def salesman_dashboard():
         return render_template('salesman_dashboard.html',session=session)
     return redirect(url_for('login'))
 
+from PIL import Image
+
 @app.route('/admin/add-product', methods=['GET', 'POST'])
 def add_product():
     if 'role' in session and session['role'] in ['Admin', 'Supervisor']:
         if request.method == 'POST':
-            data = request.form
-            brand_name = data['brand_name']
-            brand_code = data['brand_code']
-            barcode = data['barcode']
-            invoice_rate = float(data['invoice_rate'])
-            mrp = float(data['mrp'])
-            selling_price = float(data['selling_price'])
-            brand_type = data['brand_type']
-            brand_size = data['brand_size']
-            added_by = session.get('user_id')
+            try:
+                data = request.form
+                brand_name = data['brand_name'].strip().replace(" ", "_")
+                brand_code = data['brand_code']
+                barcode = data['barcode']
+                invoice_rate = float(data['invoice_rate'])
+                mrp = float(data['mrp'])
+                selling_price = float(data['selling_price'])
+                brand_type = data['brand_type'].strip().replace(" ", "_")
+                brand_size = data['brand_size'].strip()
+                added_by = session.get('user_id')
 
-            # Handle image upload
-            image_file = request.files.get('image')
-            image_path = None
+                # Handle image upload
+                image_file = request.files.get('image')
+                image_path = None
 
-            if image_file:
-                if image_file.filename.split('.')[-1].lower() in app.config['ALLOWED_EXTENSIONS']:
-                    filename = secure_filename(image_file.filename)
+                if image_file and image_file.filename.split('.')[-1].lower() in app.config['ALLOWED_EXTENSIONS']:
+                    filename = f"{brand_name}_{brand_type}_{brand_size}.png"
                     image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                    image_file.save(image_path)
+                    # Compress and save the image
+                    save_compressed_image(image_file, image_path)
+                else:
+                    image_path = "static/uploads/Default.png"
 
-            new_product = Product(
-                brand_name=brand_name,
-                brand_code=brand_code,
-                barcode=barcode,
-                invoice_rate=invoice_rate,
-                mrp=mrp,
-                selling_price=selling_price,
-                brand_type=brand_type,
-                brand_size=brand_size,
-                added_by=added_by,
-                image_path=image_path
-            ) 
 
-            db.session.add(new_product)
-            db.session.commit()
-            return redirect(url_for('admin_dashboard'))
+                # Create product
+                new_product = Product(
+                    brand_name=brand_name,
+                    brand_code=brand_code,
+                    barcode=barcode,
+                    invoice_rate=invoice_rate,
+                    mrp=mrp,
+                    selling_price=selling_price,
+                    brand_type=brand_type,
+                    brand_size=brand_size,
+                    added_by=added_by,
+                    image_path=image_path
+                )
+
+                db.session.add(new_product)
+                db.session.commit()
+                flash("Product added successfully!", "success")
+            except Exception as e:
+                db.session.rollback()
+                flash(f"Error adding product: {str(e)}", "danger")
+            return redirect(request.referrer)
         return render_template('add_product.html')
-    return jsonify({'message': 'Unauthorized'}), 403
+    flash("Unauthorized access!", "danger")
+    return redirect(url_for('login'))
+
+def save_compressed_image(image_file, path, resolution=(300, 300)):
+    """
+    Compress and save an image to a specified resolution and path.
+    """
+    with Image.open(image_file) as img:
+        img = img.convert("RGB")  # Ensure RGB mode
+        img.thumbnail(resolution)  # Resize image
+        img.save(path, format='PNG', optimize=True)
 
 @app.route('/admin/import-products', methods=['GET', 'POST'])
 def import_products():
@@ -344,14 +441,17 @@ def import_products():
                         selling_price=row['selling_price'],
                         brand_type=row['brand_type'],
                         brand_size=row['brand_size'],
+                        image_path="static/uploads/"+row['image_path'],
                         added_by=session.get('user_id')
                     )
                     db.session.add(product)
 
             db.session.commit()
-            return jsonify({'message': 'Products imported successfully!'})
+            flash("Products imported successfully!", "success")
         except Exception as e:
-            return jsonify({'error': f'Failed to import products: {str(e)}'}), 500
+            db.session.rollback()
+            flash(f"Failed to import products: {str(e)}", "danger")
+        return redirect(url_for('view_products'))
 
     return render_template('import_products.html')
 
@@ -392,7 +492,54 @@ def export_products():
 
     # Send the file to the user as a downloadable attachment
     return send_file(file_path, as_attachment=True)
- 
+
+@app.route('/admin/upload-images', methods=['GET', 'POST'])
+def upload_images():
+    if 'role' not in session or session['role'] not in ['Admin', 'Supervisor']:
+        return jsonify({'message': 'Unauthorized'}), 403
+
+    if request.method == 'POST':
+        files = request.files.getlist('images')
+        success_count, error_count = 0, 0
+
+        for image_file in files:
+            if image_file.filename.split('.')[-1].lower() not in app.config['ALLOWED_EXTENSIONS']:
+                error_count += 1
+                continue
+
+            try:
+                # Extract product details from the filename
+                filename = secure_filename(image_file.filename)
+                brand_name, brand_type, brand_size = filename.rsplit('.', 1)[0].split('_')
+
+                # Find product
+                product = Product.query.filter_by(
+                    brand_name=brand_name.replace("_", " "),
+                    brand_type=brand_type.replace("_", " "),
+                    brand_size=brand_size
+                ).first()
+
+                if not product:
+                    error_count += 1
+                    continue
+
+                # Save compressed image
+                image_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{filename}")
+                save_compressed_image(image_file, image_path)
+                product.image_path = image_path  # Update product image path
+                db.session.commit()
+                success_count += 1
+            except Exception as e:
+                error_count += 1
+                continue
+
+        return jsonify({
+            'message': f'{success_count} images uploaded successfully, {error_count} errors occurred.'
+        }), 200
+
+    return render_template('upload_images.html')
+
+
 @app.route('/admin/add-stock', methods=['GET', 'POST'])
 def add_stock():
     if 'role' in session and session['role'] in ['Admin', 'Supervisor']:
@@ -401,7 +548,7 @@ def add_stock():
             product_id = int(data['product_id'])
             quantity = int(data['quantity'])
             added_by = session['username']
-            date_added = datetime.utcnow()
+            date_added = datetime.now()
 
             # Update or insert stock
             existing_stock = Stock.query.filter_by(product_id=product_id).first()
@@ -423,7 +570,7 @@ def add_stock():
             db.session.add(stock_history_entry)
 
             db.session.commit()
-            return redirect(url_for('admin_dashboard'))
+            return redirect(url_for('add_stock'))
 
         barcode = request.args.get('barcode', '')
         brand_code = request.args.get('brand_code', '')
@@ -515,7 +662,6 @@ def view_stock():
         return render_template('view_stock.html', products=product_dicts, filters=filters)
     return jsonify({'message': 'Unauthorized'}), 403
 
-from datetime import datetime
 
 @app.route('/admin/stock-history', methods=['GET'])
 def stock_history():
@@ -542,7 +688,7 @@ def stock_history():
             'brand_type': h.brand_type,
             'brand_size': h.brand_size,
             'quantity': h.quantity,
-            'date_added': h.date_added.strftime('%Y-%m-%d %I:%M %p'),  # Convert to 12-hour format
+            'date_added': h.date_added.strftime('%d-%m-%Y %I:%M %p'),  # Date in DD-MM-YYYY, Time in 12-hour format
             'added_by': h.added_by
         } for h in stock_history]
 
@@ -750,7 +896,6 @@ def remove_product_from_sale():
     else:
         return jsonify({'error': 'Product not found in sale list'}), 404
 
-from datetime import datetime
 
 @app.route('/sales/confirm-sale', methods=['POST'])
 def confirm_sale():
@@ -797,11 +942,13 @@ def reject_sale():
 
 @app.route('/admin/view-sales', methods=['GET'])
 def view_sales():
-    if session.get('role') != 'Admin':
+    if session.get('role') not in ['Admin', 'Supervisor', 'Salesman']:
         return jsonify({'error': 'Unauthorized'}), 403
 
-    # Fetch all sales
-    sales = Sale.query.join(Product, Sale.product_id == Product.id).join(User, Sale.user_id == User.id).all()
+    # Fetch all sales ordered by date_sold in descending order
+    sales = Sale.query.join(Product, Sale.product_id == Product.id)\
+        .join(User, Sale.user_id == User.id)\
+        .order_by(Sale.date_sold.desc()).all()
 
     serialized_sales = [
         {
@@ -812,41 +959,49 @@ def view_sales():
             "brand_code": sale.product.brand_code,
             "quantity": sale.quantity,
             "seller": sale.user.username,
-            "date_sold": sale.date_sold.strftime('%Y-%m-%d %H:%M:%S'),
-            "product_id": sale.product_id,
+            "date_sold": sale.date_sold.strftime('%d-%m-%Y %I:%M %p'),
         }
         for sale in sales
     ]
     return render_template('view_sales.html', sales=serialized_sales)
 
 
-@app.route('/admin/revoke-sale', methods=['POST'])
-def revoke_sale():
+
+@app.route('/admin/edit-sale', methods=['POST'])
+def edit_sale():
     if session.get('role') != 'Admin':
         return jsonify({'error': 'Unauthorized'}), 403
 
     data = request.get_json()
     sale_id = data.get('sale_id')
+    new_quantity = int(data.get('new_quantity'))  # Convert new_quantity to integer
 
-    # Fetch sale record
+    # Fetch the sale record
     sale = Sale.query.get(sale_id)
     if not sale:
         return jsonify({'error': 'Sale record not found'}), 404
 
-    # Add quantity back to stock
+    # Fetch the stock entry
     stock_entry = Stock.query.filter_by(product_id=sale.product_id).first()
-    if stock_entry:
-        stock_entry.quantity += sale.quantity
-    else:
-        # Create a new stock entry if none exists
-        stock_entry = Stock(product_id=sale.product_id, quantity=sale.quantity)
-        db.session.add(stock_entry)
+    if not stock_entry:
+        return jsonify({'error': 'Stock entry not found'}), 404
 
-    # Remove or update the sale record
-    db.session.delete(sale)  # Remove the sale record
+    # Calculate the difference
+    quantity_difference = new_quantity - sale.quantity
+
+    if quantity_difference > 0:
+        # Check if enough stock is available
+        if stock_entry.quantity < quantity_difference:
+            return jsonify({'error': 'Not enough stock available to increase sale quantity'}), 400
+        stock_entry.quantity -= quantity_difference  # Reduce stock
+    elif quantity_difference < 0:
+        stock_entry.quantity += abs(quantity_difference)  # Add back to stock
+
+    # Update the sale record
+    sale.quantity = new_quantity
     db.session.commit()
 
-    return jsonify({'message': 'Sale revoked and stock updated successfully'})
+    return jsonify({'message': 'Sale updated successfully.'})
 
 @app.route('/daily-report', methods=['GET'])
 def daily_report():
@@ -905,6 +1060,78 @@ def export_to_excel():
     response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     response.headers['Content-Disposition'] = f'attachment; filename="daily_report_{today}.xlsx"'
     return response
+
+@app.route('/admin/trade-stock', methods=['POST'])
+def trade_stock():
+    try:
+        data = request.get_json()
+        product_id = data.get('product_id')
+        bar_name = data.get('bar_name')
+        person_name = data.get('person_name')
+        quantity = data.get('quantity')
+        trade_type = data.get('trade_type')
+
+        product = Product.query.get(product_id)
+        if not product:
+            return jsonify({'error': 'Product not found'}), 404
+
+        stock_value = product.invoice_rate * quantity
+        mrp_value = product.mrp * quantity
+        selling_price_value = product.selling_price * quantity
+
+        # Update Stock
+        stock_entry = Stock.query.filter_by(product_id=product_id).first()
+        if not stock_entry:
+            return jsonify({'error': 'No stock available for this product'}), 404
+
+        if trade_type == 'borrow':
+            if stock_entry.quantity < quantity:
+                return jsonify({'error': 'Insufficient stock to borrow'}), 400
+            stock_entry.quantity -= quantity
+        elif trade_type == 'lend':
+            stock_entry.quantity += quantity
+        else:
+            return jsonify({'error': 'Invalid trade type'}), 400
+
+        # Create a trade record
+        trade = TradeRecord(
+            product_id=product_id,
+            bar_name=bar_name,
+            person_name=person_name,
+            quantity=quantity,
+            trade_type=trade_type,
+            stock_value=stock_value,
+            mrp_value=mrp_value,
+            selling_price_value=selling_price_value,
+        )
+        db.session.add(trade)
+        db.session.commit()
+        return jsonify({'message': 'Trade record added successfully.'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Failed to add trade record: {str(e)}'}), 500
+
+@app.route('/admin/view-trades', methods=['GET'])
+def view_trades():
+    try:
+        trades = TradeRecord.query.join(Product, TradeRecord.product_id == Product.id).all()
+        return render_template('view_trades.html', trades=trades)
+    except Exception as e:
+        flash(f"Error fetching trades: {str(e)}", "danger")
+        return redirect(request.referrer)
+
+@app.route('/admin/settle-trade/<int:id>', methods=['POST'])
+def settle_trade(id):
+    try:
+        trade = TradeRecord.query.get(id)
+        if not trade:
+            return jsonify({'error': 'Trade record not found'}), 404
+        trade.settlement_status = 'settled'
+        db.session.commit()
+        return jsonify({'message': 'Trade settled successfully.'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Failed to settle trade: {str(e)}'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0')

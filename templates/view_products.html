@@ -51,7 +51,7 @@
             <!-- Image -->
             <div class="col-12 col-md-2 mb-3 mb-md-0 text-center">
                 <img 
-                    src="{{ url_for('static', filename='uploads/' + product.image_path.split('/')[-1]) }}" 
+                src="{{ url_for('static', filename='uploads/' + product.image_path.split('/')[-1], _external=False) }}"
                     class="img-fluid rounded" 
                     alt="Product Image" 
                     style="height: 120px; object-fit: cover;">

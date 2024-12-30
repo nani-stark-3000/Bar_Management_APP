@@ -25,7 +25,7 @@
     <div class="row">
         {% for history in stock_history %}
         <div class="col-12 mb-4">
-            <div class="card" style="width: 100%; display: flex; flex-direction: row; align-items: center;">
+            <div class="card" style="width: 100%; display: flex; flex-direction: row; align-items: center;" data-date="{{ history.date_added.split(' ')[0] }}">
                 <!-- Product Details -->
                 <div class="card-body" style="flex-grow: 1;">
                     <h5 class="card-title mb-3">{{ history.brand_name }} {{ history.brand_type }} {{ history.brand_size }}ml</h5>
@@ -42,7 +42,7 @@
                     </h5>
                     <p class="card-text mb-1">
                         <strong>Date:</strong> {{ history.date_added.split(' ')[0] }}<br>
-                        <strong>Time:</strong> {{ history.date_added.split(' ')[1] | to12hr }}
+                        <strong>Time:</strong> {{ history.date_added.split(' ')[1] }} {{ history.date_added.split(' ')[2] }}
                     </p>
                 </div>
 
@@ -107,22 +107,20 @@ function revokeStock(productId, historyId) {
 
 // Apply Filters Functionality
 function applyFilters() {
-    const dateFilter = document.getElementById('date-filter').value;
-    const monthFilter = document.getElementById('month-filter').value;
-    const productCards = document.querySelectorAll('.card');
+    const dateFilter = document.getElementById('date-filter').value.split('-').reverse().join('-'); // Convert YYYY-MM-DD to DD-MM-YYYY
+    const historyCards = document.querySelectorAll('.card');
 
-    productCards.forEach(card => {
-        const dateAdded = card.getAttribute('data-date'); // Expected format: YYYY-MM-DD
-        const [year, month, day] = dateAdded.split('-');
+    historyCards.forEach(card => {
+        const dateAdded = card.getAttribute('data-date'); // Expected format: DD-MM-YYYY
         const matchesDate = !dateFilter || dateAdded === dateFilter;
-        const matchesMonth = !monthFilter || `${year}-${month}` === monthFilter;
 
-        if (matchesDate && matchesMonth) {
-            card.style.display = '';
+        if (matchesDate) {
+            card.style.display = 'flex'; // Show matching cards
         } else {
-            card.style.display = 'none';
+            card.style.display = 'none'; // Hide non-matching cards
         }
     });
 }
+
 </script>
 {% endblock %}

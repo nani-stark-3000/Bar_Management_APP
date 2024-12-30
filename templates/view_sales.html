@@ -41,9 +41,9 @@
 
                     <!-- Column 2: Quantity and Sold By -->
                     <div class="col-md-3 col-sm-6 mb-2 mb-md-0">
-                        <p class="card-text mb-0">
+                        <h5 class="card-text mb-0">
                             <strong>Quantity Sold:</strong> {{ sale.quantity }}
-                        </p>
+                        </h5>
                         <p class="card-text mb-0">
                             <strong>Sold By:</strong> {{ sale.seller }}
                         </p>
@@ -55,16 +55,19 @@
                             <strong>Date:</strong> {{ sale.date_sold.split(' ')[0] }}
                         </p>
                         <p class="card-text mb-0">
-                            <strong>Time:</strong> {{ sale.date_sold.split(' ')[1] | to12hr }}
+                            <strong>Time:</strong> {{ sale.date_sold.split(' ')[1] }} {{ sale.date_sold.split(' ')[2] }}
                         </p>
-                    </div>
+                    </div>                    
 
                     <!-- Column 4: Action -->
+                    {% if session['role'] != 'Salesman' %}
                     <div class="col-md-3 col-sm-6 text-md-end text-sm-start">
-                        <button class="btn btn-danger btn-sm" onclick="revokeSale({{ sale.id }})">
-                            <i class="fas fa-undo"></i> Revoke
+                        <input type="number" class="form-control mb-2" id="quantity-{{ sale.id }}" value="{{ sale.quantity }}" min="1" style="width: 80px; display: inline;">
+                        <button class="btn btn-primary btn-sm" onclick="editSale({{ sale.id }})">
+                            <i class="fas fa-save"></i> Save
                         </button>
                     </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -73,37 +76,40 @@
 </div>
 
 <script>
-// Function to revoke a sale
-function revokeSale(saleId) {
-    if (!confirm("Are you sure you want to revoke this sale?")) return;
+// Function to edit a sale
+function editSale(saleId) {
+    const newQuantity = document.getElementById(`quantity-${saleId}`).value;
 
-    fetch('/admin/revoke-sale', {
+    if (!confirm("Are you sure you want to update this sale?")) return;
+
+    fetch('/admin/edit-sale', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sale_id: saleId }),
+        body: JSON.stringify({ sale_id: saleId, new_quantity: newQuantity }),
     })
     .then(response => response.json())
     .then(data => {
         if (data.message) {
             alert(data.message);
-            location.reload(); // Reload the page to update the sales list
+            location.reload(); // Reload the page to reflect changes
         } else {
-            alert(data.error || "Failed to revoke sale");
+            alert(data.error || "Failed to update sale");
         }
     });
 }
 
+
 // Apply filters based on search input and date range
 function applyFilters() {
     const searchInput = document.getElementById('search-input').value.toLowerCase();
-    const startDate = document.getElementById('start-date').value;
-    const endDate = document.getElementById('end-date').value;
+    const startDate = document.getElementById('start-date').value.split('-').reverse().join('-'); // Convert YYYY-MM-DD to DD-MM-YYYY
+    const endDate = document.getElementById('end-date').value.split('-').reverse().join('-'); // Convert YYYY-MM-DD to DD-MM-YYYY
     const saleCards = document.querySelectorAll('.sale-card');
 
     saleCards.forEach(card => {
         const name = card.getAttribute('data-name');
         const code = card.getAttribute('data-code');
-        const date = card.getAttribute('data-date');
+        const date = card.getAttribute('data-date'); // Already in DD-MM-YYYY format from the backend
 
         const matchesSearch = (!searchInput || name.includes(searchInput) || code.includes(searchInput));
         const matchesDate = (!startDate || !endDate || (date >= startDate && date <= endDate));
@@ -115,5 +121,6 @@ function applyFilters() {
         }
     });
 }
+
 </script>
 {% endblock %}
