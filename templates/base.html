@@ -14,7 +14,7 @@
             min-height: 100vh;
             margin: 0;
             font-family: Arial, sans-serif;
-        }
+        }      
 
         /* Sidebar Styling */
         .sidebar {
@@ -109,6 +109,19 @@
             z-index: 1020; /* Footer stays above main content */
         }
 
+        input[type="number"]::-webkit-inner-spin-button, 
+        input[type="number"]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type="number"] {
+            -moz-appearance: textfield;
+            pointer-events: auto;
+            overscroll-behavior: contain;
+        }
+        
+
+
         /* Responsive Design */
         @media (max-width: 768px) {
             .sidebar {
@@ -127,6 +140,30 @@
 
             .main-content.minimized {
                 margin-left: 0;
+            }
+        }
+        
+
+        @media print {
+            /* Hide the navbar and other non-printable elements */
+            nav, .navbar, .no-print {
+                display: none !important;
+            }
+
+            .navbar {
+                position: static !important;
+            }
+    
+            /* Remove default margins and padding */
+            body {
+                margin: 0;
+                padding: 0;
+            }
+    
+            /* Adjust content layout to fill the top */
+            .container-fluid {
+                margin-top: 0 !important;
+                padding-top: 0 !important;
             }
         }
     </style>

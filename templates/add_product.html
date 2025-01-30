@@ -1,47 +1,47 @@
 {% extends 'base.html' %}
 {% block title %}Add New Product{% endblock %}
 {% block content %}
-<h2>Add New Product</h2>
-<a href="{{ url_for('export_products') }}" class="btn btn-success">Export Products</a>
-<a href="{{ url_for('import_products') }}" class="btn btn-primary">Import Products</a>
-<a href="{{ url_for('upload_images') }}" class="btn btn-info">Upload Images</a>
-<form method="POST" enctype="multipart/form-data">
+<h2 class="text-center mb-4">Add New Product</h2>
+
+<!-- Action Buttons -->
+<div class="mb-4">
+    <a href="{{ url_for('export_products') }}" class="btn btn-success me-2"><i class="fas fa-file-export"></i> Export Products</a>
+    <a href="{{ url_for('import_products') }}" class="btn btn-primary me-2"><i class="fas fa-file-import"></i> Import Products</a>
+    <a href="{{ url_for('upload_images') }}" class="btn btn-info"><i class="fas fa-upload"></i> Upload Images</a>
+</div>
+
+<!-- Product Form -->
+<form method="POST" enctype="multipart/form-data" class="card p-4 shadow-sm">
     <div class="mb-3">
-        <label>Brand Name</label>
-        <input type="text" name="brand_name" class="form-control" required>
+        <label for="brand-name" class="form-label">Brand Name</label>
+        <input type="text" id="brand-name" name="brand_name" class="form-control" placeholder="Enter brand name" required>
     </div>
     <div class="mb-3">
-        <label>Brand Code</label>
-        <input type="text" name="brand_code" class="form-control" required>
+        <label for="brand-code" class="form-label">Brand Code</label>
+        <input type="text" id="brand-code" name="brand_code" class="form-control" placeholder="Enter brand code" required>
     </div>
     <div class="mb-3">
-        <label>Barcode</label>
-        <input type="text" name="barcode" class="form-control" required>
+        <label for="barcode" class="form-label">Barcode</label>
+        <input type="text" id="barcode" name="barcode" class="form-control" placeholder="Enter product barcode" required>
     </div>
     <div class="mb-3">
-        <label>Invoice Rate</label>
-        <input type="number" name="invoice_rate" class="form-control" step="0.01" required>
+        <label for="brand-type" class="form-label">Brand Type</label>
+        <input type="text" id="brand-type" name="brand_type" class="form-control" placeholder="Enter brand type (e.g., Whiskey)" required>
     </div>
     <div class="mb-3">
-        <label>MRP</label>
-        <input type="number" name="mrp" class="form-control" step="0.01" required>
+        <label for="brand-size" class="form-label">Brand Size</label>
+        <input type="text" id="brand-size" name="brand_size" class="form-control" placeholder="Enter size (e.g., 750ml)" required>
     </div>
     <div class="mb-3">
-        <label>Selling Price</label>
-        <input type="number" name="selling_price" class="form-control" step="0.01" required>
-    </div>
+        <label for="selling-price" class="form-label">Selling Price</label>
+        <input type="number" id="selling-price" name="selling_price" class="form-control" 
+               placeholder="Enter selling price" required>
+    </div>    
     <div class="mb-3">
-        <label>Brand Type</label>
-        <input type="text" name="brand_type" class="form-control" required>
+        <label for="image" class="form-label">Product Image</label>
+        <input type="file" id="image" name="image" class="form-control">
+        <small class="form-text text-muted">Upload a PNG image. Naming convention: <code>brand_name_brand_type_brand_size.png</code></small>
     </div>
-    <div class="mb-3">
-        <label>Brand Size</label>
-        <input type="text" name="brand_size" class="form-control" required>
-    </div>
-    <div class="mb-3">
-        <label>Product Image</label>
-        <input type="file" name="image" class="form-control">
-    </div>
-    <button type="submit" class="btn btn-primary">Add Product</button>
+    <button type="submit" class="btn btn-primary w-100"><i class="fas fa-save"></i> Add Product</button>
 </form>
 {% endblock %}

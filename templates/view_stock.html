@@ -7,12 +7,9 @@
 <div class="row mb-4">
     <div class="col-md-4">
         <label>Search Product (Name or Code)</label>
-        <input type="text" id="search-input" class="form-control" placeholder="Type to search..." oninput="liveSearch()">
-        <ul id="search-results" class="list-group mt-2" style="display: none;">
-            <!-- Search results will be dynamically inserted here -->
-        </ul>
+        <input type="text" id="search-input" class="form-control" placeholder="Type to search..." oninput="applyFilters()">
     </div>
-    <div class="col-md-3">
+    <div class="col-md-2">
         <label>Filter by Type</label>
         <select id="type-filter" class="form-control" onchange="applyFilters()">
             <option value="">All Types</option>
@@ -21,7 +18,7 @@
             {% endfor %}
         </select>
     </div>
-    <div class="col-md-3">
+    <div class="col-md-2">
         <label>Filter by Size</label>
         <select id="size-filter" class="form-control" onchange="applyFilters()">
             <option value="">All Sizes</option>
@@ -30,94 +27,181 @@
             {% endfor %}
         </select>
     </div>
-    <div class="col-md-2">
-        <label>Filter by MRP Range</label>
-        <select id="mrp-filter" class="form-control" onchange="applyFilters()">
-            <option value="">All</option>
-            <option value="0-100">0-100</option>
-            <option value="100-500">100-500</option>
-            <option value="500-1000">500-1000</option>
-            <option value="1000-2000">1000-2000</option>
-            <option value="2000+">2000+</option>
-        </select>
+    <div class="col-md-4">
+        <label for="selling-price-range">Filter by Selling Price (₹)</label>
+        <div class="slider-container">
+            <input type="range" id="price-min" class="form-range" min="{{ filters.price_range[0] }}" max="{{ filters.price_range[1] }}" value="{{ filters.price_range[0] }}" onchange="updatePriceLabels()">
+            <input type="range" id="price-max" class="form-range" min="{{ filters.price_range[0] }}" max="{{ filters.price_range[1] }}" value="{{ filters.price_range[1] }}" onchange="updatePriceLabels()">
+            <div class="d-flex justify-content-between mt-1">
+                <small>₹<span id="price-min-label">{{ filters.price_range[0] }}</span></small>
+                <small>₹<span id="price-max-label">{{ filters.price_range[1] }}</span></small>
+            </div>
+        </div>
     </div>
 </div>
 
+<div class="d-flex justify-content-between mb-3">
+    <button class="btn btn-primary" onclick="exportToCSV()">Export to CSV</button>
+</div>
+
 <!-- Stock Grid -->
-<div id="stock-grid" class="row">
+<div id="stock-grid" class="row g-3">
     {% for product in products %}
-    <div class="col-md-12 mb-3 product-card" data-type="{{ product.brand_type }}" data-size="{{ product.brand_size }}" data-mrp="{{ product.mrp }}">
-        <div class="card flex-md-row align-items-center">
-            <img src="{{ url_for('static', filename='uploads/' + product.image_path.split('/')[-1]) }}" class="card-img-left img-fluid" alt="Product Image" style="width: 150px; height: 150px; object-fit: cover;">
-            <div class="card-body">
-                <h5 class="card-title">{{ product.brand_name }} {{ product.brand_type }} {{ product.brand_size }}ml</h5>
-                <p class="card-text mb-2">
-                    <strong>Brand Code:</strong> {{ product.brand_code }}<br>
-                    <strong>Barcode:</strong> {{ product.barcode }}
-                </p>
+    <div class="col-md-12 product-card" 
+         data-type="{{ product.brand_type }}" 
+         data-size="{{ product.brand_size }}" 
+         data-price="{{ product.selling_price }}">
+        <div class="card shadow-sm">
+            <div class="d-flex flex-wrap align-items-center p-3">
+                <!-- Product Image -->
+                <img src="{{ url_for('static', filename='uploads/' + product.image_path.split('/')[-1]) }}" 
+                     alt="Product Image" 
+                     class="img-fluid rounded me-3" 
+                     style="width: 100px; height: 100px; object-fit: cover;">
+                
+                <!-- Product Details -->
+                <div>
+                    <h5 class="card-title">{{ product.brand_name }} {{ product.brand_type }} {{ product.brand_size }}ml</h5>
+                    <p class="mb-1">
+                        <strong>Brand Code:</strong> {{ product.brand_code }}<br>
+                        <strong>Barcode:</strong> {{ product.barcode }}
+                    </p>
+                    <p class="mb-0">
+                        <strong>Selling Price:</strong> ₹{{ product.selling_price }}
+                    </p>
+                </div>
             </div>
-            <div class="card-body text-center">
-                <p class="card-text mb-0">
-                    <strong>Invoice Rate:</strong> ₹{{ product.invoice_rate }}<br>
-                    <strong>MRP:</strong> ₹{{ product.mrp }}<br>
-                    <strong>Selling Price:</strong> ₹{{ product.selling_price }}
-                </p>
+            
+            <!-- Stock Details -->
+            {% for stock in product.stock_sets %}
+            <div class="card-body p-2 border-top">
+                <div class="d-flex justify-content-between">
+                    <div><strong>Invoice Rate:</strong> ₹{{ stock.invoice_rate }}</div>
+                    <div><strong>MRP:</strong> ₹{{ stock.mrp }}</div>
+                    <div><strong>Quantity:</strong> {{ stock.quantity }}</div>
+                    <div>
+                        <strong>Date:</strong> {{ stock.date_added.split(" ")[0] }}<br>
+                        <strong>Time:</strong> {{ stock.date_added.split(" ")[1] | to12hr }}
+                    </div>
+                </div>
             </div>
-            <div class="card-body text-end">
-                <p class="card-text mb-0" style="font-size: 2rem;">
-                    <strong>Total Stock:</strong> {{ product.total_stock or 0 }}
-                </p>
-            </div>
+            {% endfor %}
         </div>
     </div>
     {% endfor %}
 </div>
 
 <script>
-// Load products
-const products = JSON.parse('{{ products | tojson }}');
+    function updatePriceLabels() {
+        const minPrice = parseInt(document.getElementById('price-min').value, 10);
+        const maxPrice = parseInt(document.getElementById('price-max').value, 10);
 
-// Live Search Functionality
-function liveSearch() {
-    const searchInput = document.getElementById('search-input').value.toLowerCase();
-    const productCards = document.querySelectorAll('.product-card');
+        document.getElementById('price-min-label').textContent = minPrice;
+        document.getElementById('price-max-label').textContent = maxPrice;
 
-    productCards.forEach(card => {
-        const name = card.querySelector('.card-title').textContent.toLowerCase();
-        const code = card.querySelector('.card-text').textContent.toLowerCase();
-        if (name.includes(searchInput) || code.includes(searchInput)) {
-            card.style.display = '';
-        } else {
-            card.style.display = 'none';
-        }
-    });
-}
+        applyFilters();
+    }
 
-// Filter Functionality
-function applyFilters() {
-    const typeFilter = document.getElementById('type-filter').value;
-    const sizeFilter = document.getElementById('size-filter').value;
-    const mrpFilter = document.getElementById('mrp-filter').value;
-    const productCards = document.querySelectorAll('.product-card');
+    function applyFilters() {
+        const searchInput = document.getElementById('search-input').value.toLowerCase();
+        const typeFilter = document.getElementById('type-filter').value;
+        const sizeFilter = document.getElementById('size-filter').value;
+        const minPrice = parseFloat(document.getElementById('price-min').value);
+        const maxPrice = parseFloat(document.getElementById('price-max').value);
 
-    productCards.forEach(card => {
-        const type = card.getAttribute('data-type');
-        const size = card.getAttribute('data-size');
-        const mrp = parseFloat(card.getAttribute('data-mrp'));
+        const productCards = document.querySelectorAll('.product-card');
 
-        const matchesType = !typeFilter || type === typeFilter;
-        const matchesSize = !sizeFilter || size === sizeFilter;
-        const matchesMRP =
-            !mrpFilter ||
-            (mrpFilter === '2000+' && mrp > 2000) ||
-            (mrp >= parseInt(mrpFilter.split('-')[0]) && mrp <= parseInt(mrpFilter.split('-')[1]));
+        productCards.forEach(card => {
+            const name = card.querySelector('.card-title').textContent.toLowerCase();
+            const type = card.getAttribute('data-type');
+            const size = card.getAttribute('data-size');
+            const price = parseFloat(card.getAttribute('data-price'));
 
-        if (matchesType && matchesSize && matchesMRP) {
-            card.style.display = '';
-        } else {
-            card.style.display = 'none';
-        }
-    });
-}
+            const matchesSearch = !searchInput || name.includes(searchInput);
+            const matchesType = !typeFilter || type === typeFilter;
+            const matchesSize = !sizeFilter || size === sizeFilter;
+            const matchesPrice = price >= minPrice && price <= maxPrice;
+
+            if (matchesSearch && matchesType && matchesSize && matchesPrice) {
+                card.style.display = 'block';
+            } else {
+                card.style.display = 'none';
+            }
+        });
+    }
+
+    function exportToCSV() {
+        fetch('/admin/export-stock', {
+            method: 'GET',
+        })
+            .then((response) => {
+                if (response.ok) {
+                    return response.blob();
+                }
+                throw new Error('Failed to export stock data.');
+            })
+            .then((blob) => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = 'stock_data.csv';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+            })
+            .catch((error) => alert(error.message));
+    }
 </script>
+
+<style>
+    .slider-container {
+        position: relative;
+    }
+
+    #price-min, #price-max {
+        width: 100%;
+        background: transparent;
+    }
+
+    #price-min::-webkit-slider-thumb, #price-max::-webkit-slider-thumb {
+        width: 16px;
+        height: 16px;
+        background-color: #007bff;
+        border-radius: 50%;
+        cursor: pointer;
+    }
+
+    .card-title {
+        font-size: 1.1rem;
+        font-weight: 600;
+    }
+
+    .product-card .card {
+        border: none; /* Remove Bootstrap's default card border */
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Add a subtle shadow */
+        border-radius: 8px; /* Maintain rounded corners */
+    }
+
+    .product-card {
+        border: 1px solid #ddd; /* Apply a single border to the outer container */
+        border-radius: 8px; /* Ensure consistency with the inner card */
+        padding: 0; /* Remove extra padding if any */
+        overflow: hidden; /* Prevent borders from overlapping */
+    }
+
+    .product-card img {
+        border-radius: 8px 0 0 8px; /* Match the card's rounded corners */
+    }
+
+    .card-body {
+        padding: 16px; /* Consistent padding inside cards */
+    }
+
+    /* Remove any global card border applied elsewhere */
+    .card:not(.product-card) {
+        border: none !important;
+    }
+    
+</style>
 {% endblock %}

@@ -1,17 +1,6 @@
-Flask
-Werkzeug
-SQLAlchemy
-pandas
-xhtml2pdf
-openpyxl
-itsdangerous
-MarkupSafe
-Jinja2
-requests  # Optional, for external API calls
-
-# For development/testing (consider using a separate file)
-Flask-WTF  # For forms validation
-Flask-DebugToolbar
-
-# For production (consider a separate file)
-gunicorn  # WSGI server
+Flask==3.0.0
+Flask-SQLAlchemy==3.1.1
+SQLAlchemy==2.0.25
+Werkzeug==3.0.1
+pandas==2.2.0
+Pillow==10.2.0

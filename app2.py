@@ -1,15 +1,14 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file, make_response,flash
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file, make_response, flash, Response
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func
+from sqlalchemy import func, desc, extract
 from werkzeug.utils import secure_filename
 import os
-import io
-from datetime import datetime, timedelta, date, time
-import json
+from datetime import datetime, date, timedelta
+import uuid 
 import pandas as pd
-from xhtml2pdf import pisa
-import openpyxl
 from PIL import Image
+import csv
+from io import StringIO
 
 app = Flask(__name__)
 app.secret_key = 'New Pavan Restaurant And Bar'
@@ -30,25 +29,26 @@ class User(db.Model):
     username = db.Column(db.String(80), unique=True, nullable=False)
     password = db.Column(db.String(200), nullable=False)
     role = db.Column(db.String(20), nullable=False)
+    barcode = db.Column(db.String(50), unique=True, nullable=False)
 
 class Product(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     brand_name = db.Column(db.String(80), nullable=False)
     brand_code = db.Column(db.String(80), nullable=False)
     barcode = db.Column(db.String(100), unique=True, nullable=False)
-    invoice_rate = db.Column(db.Float, nullable=False)
-    mrp = db.Column(db.Float, nullable=False)
-    selling_price = db.Column(db.Float, nullable=False)
-    date_added = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    added_by = db.Column(db.String(80), nullable=False)
     brand_type = db.Column(db.String(80), nullable=False)
     brand_size = db.Column(db.String(80), nullable=False)
     image_path = db.Column(db.String(120), nullable=True)  # Image field
+    date_added = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    added_by = db.Column(db.String(80), nullable=False)
+    selling_price = db.Column(db.Float, nullable=False, default=0.0)  # Added selling price field
 
 class Stock(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
     quantity = db.Column(db.Integer, nullable=False)
+    invoice_rate = db.Column(db.Float, nullable=False)  # IR
+    mrp = db.Column(db.Float, nullable=False)           # MRP
     added_by = db.Column(db.String(80), nullable=False)
     date_added = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     product = db.relationship('Product', backref=db.backref('stocks', lazy=True))
@@ -57,6 +57,8 @@ class StockHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
     quantity = db.Column(db.Integer, nullable=False)
+    invoice_rate = db.Column(db.Float, nullable=False)  # Newly added
+    mrp = db.Column(db.Float, nullable=False)           # Newly added
     added_by = db.Column(db.String(80), nullable=False)
     date_added = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     product = db.relationship('Product', backref=db.backref('stock_history', lazy=True))
@@ -64,124 +66,50 @@ class StockHistory(db.Model):
 
 class Sale(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)  # Link to Product
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # Link to User who made the sale
-    quantity = db.Column(db.Integer, nullable=False)  # Quantity sold
-    total_price = db.Column(db.Float, nullable=False)  # Total price of the sale
-    date_sold = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)  # Date of sale
-    product = db.relationship('Product', backref=db.backref('sales', lazy=True))
-    user = db.relationship('User', backref=db.backref('sales', lazy=True))
-
-class TradeRecord(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
     product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
-    bar_name = db.Column(db.String(255), nullable=False)
-    person_name = db.Column(db.String(255), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     quantity = db.Column(db.Integer, nullable=False)
-    trade_type = db.Column(db.String(50), nullable=False)  # "borrow" or "lend"
-    date_exchanged = db.Column(db.DateTime, default=datetime.utcnow)
-    settlement_status = db.Column(db.String(50), default="pending")
-    stock_value = db.Column(db.Float, nullable=False)  # Invoice rate x Quantity
-    mrp_value = db.Column(db.Float, nullable=False)  # MRP x Quantity
-    selling_price_value = db.Column(db.Float, nullable=False)  # Selling price x Quantity
-    product = db.relationship('Product', backref=db.backref('trade_records', lazy=True))
+    total_price = db.Column(db.Float, nullable=False)
+    date_sold = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    invoice_rate = db.Column(db.Float, nullable=False)  # Store invoice rate
+    mrp = db.Column(db.Float, nullable=False)           # Store MRP
+    selling_price = db.Column(db.Float, nullable=False)  # Store selling price
+    profit = db.Column(db.Float, nullable=False)        # Store profit for the sale
+    product = db.relationship('Product', backref=db.backref('sales', lazy=True))
 
+
+class DailyReport(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    report_date = db.Column(db.Date, unique=True, nullable=False)
+    report_data = db.Column(db.JSON, nullable=False)  # JSON column for report data
+    total_sales_by_type = db.Column(db.JSON, nullable=False)  # JSON for sales by brand type
+    total_profit_by_type = db.Column(db.JSON, nullable=False)  # ✅ NEW COLUMN for profit by brand type
+    grand_total_sale = db.Column(db.Float, nullable=False)  # Grand total sales
+    grand_total_profit = db.Column(db.Float, nullable=False)  # ✅ NEW COLUMN for grand total profit
+
+
+# Dynamically fetch model classes
+MODEL_CLASSES = {
+    "User": User,
+    "Product": Product,
+    "Stock": Stock,
+    "StockHistory": StockHistory,
+    "Sale": Sale,
+    "DailyReport": DailyReport,
+}
 
 # Default Admin Creation
 with app.app_context():
     db.create_all()
     if not User.query.filter_by(username='admin').first():
-        admin_user = User(username='admin', password='admin123', role='Admin')
+        admin_user = User(username='admin', password='admin123', role='Admin', barcode='123456789101')
         db.session.add(admin_user)
         db.session.commit()
 
-def generate_daily_report_data():
-    today = datetime.now().date()
+# Helper: Calculate total profit
+def calculate_profit(selling_price, invoice_rate, quantity):
+    return (selling_price - invoice_rate) * quantity
 
-    report_data = {}
-    grand_total_sales_by_type = {}
-    grand_total_sale = 0  # Grand total across all brand types
-
-    products = Product.query.all()
- 
-    for product in products:
-        if product.brand_type not in report_data:
-            report_data[product.brand_type] = {}
-            grand_total_sales_by_type[product.brand_type] = 0  # Initialize total sales for this type
-
-        if product.brand_name not in report_data[product.brand_type]:
-            report_data[product.brand_type][product.brand_name] = {
-                "sizes": {},
-                "total": {"ob": 0, "cb": 0, "sale": 0, "amount": 0, "new_stock": 0},
-            }
-
-        # Fetch current stock
-        current_stock = (
-            db.session.query(func.sum(Stock.quantity))
-            .filter(Stock.product_id == product.id)
-            .scalar()
-            or 0
-        )
-
-        # Fetch today's sales
-        today_sales = (
-            db.session.query(func.sum(Sale.quantity))
-            .filter(
-                Sale.product_id == product.id,
-                Sale.date_sold >= datetime.combine(today, time(0, 0))  # Assuming sales day starts at 2:00 AM
-            )
-            .scalar()
-            or 0
-        )
-
-        # Fetch today's stock additions from StockHistory
-        today_stock_added = (
-            db.session.query(func.sum(StockHistory.quantity))
-            .filter(
-                StockHistory.product_id == product.id,
-                StockHistory.date_added >= datetime.combine(today, time(0, 0))
-            )
-            .scalar()
-            or 0
-        )
-
-        # Calculate OB (Opening Balance) and CB (Closing Balance)
-        ob = current_stock + today_sales - today_stock_added
-        cb = current_stock
-
-        # Calculate sale and amount
-        sale = today_sales
-        amount = sale * product.selling_price
-
-        # Update brand data
-        report_data[product.brand_type][product.brand_name]["sizes"][product.brand_size] = {
-            "ob": ob,
-            "cb": cb,
-            "sale": sale,
-            "amount": amount,
-            "new_stock": today_stock_added,
-        }
-
-        # Update totals
-        totals = report_data[product.brand_type][product.brand_name]["total"]
-        totals["ob"] += ob
-        totals["cb"] += cb
-        totals["sale"] += sale
-        totals["amount"] += amount
-        totals["new_stock"] += today_stock_added
-
-        # Update grand total sales for this type and overall
-        grand_total_sales_by_type[product.brand_type] += amount
-        grand_total_sale += amount
-
-    # Sort sizes in descending order for each brand
-    for brand_type, brands in report_data.items():
-        for brand_name, brand_data in brands.items():
-            brand_data["sizes"] = dict(
-                sorted(brand_data["sizes"].items(), key=lambda x: int(x[0]), reverse=True)
-            )
-
-    return report_data, grand_total_sales_by_type, grand_total_sale
 
 # Routes
 @app.route('/')
@@ -191,96 +119,147 @@ def index():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
+        # Check if the request is a barcode-only login attempt
+        if request.is_json:
+            data = request.get_json()
+            barcode = data.get("barcode")
+            if barcode:
+                user = User.query.filter_by(barcode=barcode).first()
+                if user:
+                    session['user_id'] = user.id
+                    session['role'] = user.role
+                    session['username'] = user.username
+                    # Redirect to appropriate dashboard
+                    redirect_url = url_for(f"{user.role.lower()}_dashboard")
+                    return jsonify({"redirect_url": redirect_url})
+                return jsonify({"error": "Invalid barcode"}), 401
+
+        # Standard username/password login
         username = request.form['username']
         password = request.form['password']
         user = User.query.filter_by(username=username).first()
-        if user and user.password == password :
-            # Store necessary user details in session
+        if user and user.password == password:
             session['user_id'] = user.id
             session['role'] = user.role
             session['username'] = user.username
-            
-            # Redirect based on role
-            if user.role == 'Admin':
-                return redirect(url_for('admin_dashboard'))
-            elif user.role == 'Supervisor':
-                return redirect(url_for('supervisor_dashboard'))
-            elif user.role == 'Salesman':
-                return redirect(url_for('salesman_dashboard'))
-        else:
-            return "Invalid credentials", 401
+            return redirect(url_for(f"{user.role.lower()}_dashboard"))
+        return "Invalid credentials", 401
 
     return render_template('login.html')
 
-@app.route('/dashboard/summary', methods=['GET'])
-def dashboard_summary():
-    today = datetime.now().date()
 
-    # Fetch data for top cards
-    todays_sales = db.session.query(db.func.sum(Sale.total_price)).filter(db.func.date(Sale.date_sold) == today).scalar() or 0
-    todays_profit = db.session.query(
-        db.func.sum((Product.selling_price - Product.invoice_rate) * Sale.quantity)
-    ).join(Sale.product).filter(db.func.date(Sale.date_sold) == today).scalar() or 0
-    total_products_sold = db.session.query(Sale.product_id).filter(db.func.date(Sale.date_sold) == today).distinct().count()
-    total_bottles_sold = db.session.query(db.func.sum(Sale.quantity)).filter(db.func.date(Sale.date_sold) == today).scalar() or 0
-    stock_added = db.session.query(db.func.sum(StockHistory.quantity)).filter(db.func.date(StockHistory.date_added) == today).scalar() or 0
 
+def redirect_dashboard(role):
+    if role == 'Admin':
+        return redirect(url_for('admin_dashboard'))
+    elif role == 'Supervisor':
+        return redirect(url_for('supervisor_dashboard'))
+    elif role == 'Salesman':
+        return redirect(url_for('salesman_dashboard'))
+
+
+def get_filtered_sales(filter_type, date_selected):
+    today = date.today()
+    date_selected = date_selected or today.strftime('%Y-%m-%d')
+    records = []
+    
+    if filter_type == 'daily':
+        date_obj = datetime.strptime(date_selected, '%Y-%m-%d').date()
+        records = db.session.query(
+            Sale.date_sold,
+            func.sum(Sale.total_price),
+            func.sum(Sale.profit)
+        ).filter(func.date(Sale.date_sold) == date_obj).group_by(Sale.date_sold).all()
+
+    elif filter_type == 'monthly':
+        year, month = map(int, date_selected.split('-'))
+        records = db.session.query(
+            extract('day', Sale.date_sold),
+            func.sum(Sale.total_price),
+            func.sum(Sale.profit)
+        ).filter(
+            extract('year', Sale.date_sold) == year,
+            extract('month', Sale.date_sold) == month
+        ).group_by(extract('day', Sale.date_sold)).all()
+    
+    elif filter_type == 'yearly':
+        year = int(date_selected)
+        records = db.session.query(
+            extract('month', Sale.date_sold),
+            func.sum(Sale.total_price),
+            func.sum(Sale.profit)
+        ).filter(extract('year', Sale.date_sold) == year).group_by(extract('month', Sale.date_sold)).all()
+    
+    else:
+        start_date = today - timedelta(days=7)
+        records = db.session.query(
+            Sale.date_sold,
+            func.sum(Sale.total_price),
+            func.sum(Sale.profit)
+        ).filter(Sale.date_sold >= start_date).group_by(Sale.date_sold).all()
+    
+    return records
+
+@app.route('/admin/dashboard/charts', methods=['GET'])
+def get_chart_data():
+    filter_type = request.args.get('filter', 'daily')
+    date_selected = request.args.get('date', '')
+    records = get_filtered_sales(filter_type, date_selected)
+    
     return jsonify({
-        'todays_sales': todays_sales,
-        'todays_profit': todays_profit,
-        'total_products_sold': total_products_sold,
-        'total_bottles_sold': total_bottles_sold,
-        'stock_added': stock_added
+        "labels": [str(record[0]) for record in records],
+        "datasets": [
+            {"label": "Sales", "data": [float(record[1]) for record in records]},
+            {"label": "Profit", "data": [float(record[2]) for record in records]}
+        ]
     })
 
-@app.route('/dashboard/sale-history', methods=['GET'])
-def sale_history():
-    brand_name = request.args.get('brand_name')
-    time_frame = request.args.get('time_frame', 'day')  # 'day' or 'month'
+@app.route('/dashboard/brand-sales', methods=['GET'])
+def brand_sales():
+    sales_data = (
+        db.session.query(Product.brand_type, func.sum(Sale.total_price).label("total_sales"))
+        .join(Sale, Product.id == Sale.product_id)
+        .group_by(Product.brand_type)
+        .all()
+    )
+    
+    total_sales = sum(item.total_sales for item in sales_data) or 1
+    sales_percentages = [(item.total_sales / total_sales) * 100 for item in sales_data]
+    
+    return jsonify({
+        "labels": [item.brand_type for item in sales_data],
+        "datasets": [{"label": "Sales %", "data": sales_percentages}]
+    })
 
-    if not brand_name:
-        return jsonify({'data': [], 'message': 'Please select a brand.'}), 400
-
-    # Adjust time grouping for day or month
-    time_group = db.func.date(Sale.date_sold) if time_frame == 'day' else db.func.strftime('%Y-%m', Sale.date_sold)
-
-    query = db.session.query(
-        time_group.label('date'),
-        Product.brand_size.label('size'),
-        db.func.sum(Sale.quantity).label('quantity')
-    ).join(Sale.product)\
-     .filter(Product.brand_name == brand_name)\
-     .group_by('date', 'size').order_by('date')
-
-    data = [{'date': q.date, 'size': q.size, 'quantity': q.quantity} for q in query]
-
-    if not data:
-        return jsonify({'data': [], 'message': 'No sales data available for the selected brand.'}), 200
-
-    return jsonify({'data': data})
-
-
-@app.route('/dashboard/most-selling', methods=['GET'])
-def most_selling():
-    subquery = db.session.query(
-        Sale.product_id,
-        db.func.count(db.func.date(Sale.date_sold)).label('sale_days')
-    ).group_by(Sale.product_id).subquery()
-
+@app.route('/dashboard/product-sales', methods=['GET'])
+def product_sales():
+    sort = request.args.get("sort", "sales")
+    date_filter = request.args.get("date", None)
+    
     query = db.session.query(
         Product.brand_name,
-        (db.func.sum(Sale.quantity) / db.func.coalesce(subquery.c.sale_days, 1)).label('avg_bottles_per_day')
-    ).join(Sale.product).join(subquery, Sale.product_id == subquery.c.product_id)\
-     .group_by(Product.id).order_by(db.desc('avg_bottles_per_day')).limit(10)
-
-    data = [{'brand_name': q.brand_name, 'avg_bottles_per_day': round(q.avg_bottles_per_day, 2)} for q in query]
-
-    return jsonify({'data': data, 'message': 'Success'})
+        Product.brand_size,
+        Product.selling_price,
+        func.avg(Sale.quantity).label("avg_sold")
+    ).join(Sale, Product.id == Sale.product_id)
+    
+    if date_filter:
+        query = query.filter(func.date(Sale.date_sold) == date_filter)
+    
+    query = query.group_by(Product.id)
+    query = query.order_by(desc("avg_sold" if sort == "sales" else Product.selling_price))
+    
+    sales_data = query.all()
+    
+    return jsonify({
+        "labels": [f"{p.brand_name} {p.brand_size}ml - ₹{p.selling_price}" for p in sales_data],
+        "datasets": [{"label": "Avg Sold", "data": [p.avg_sold for p in sales_data]}]
+    })
 
 
 @app.route('/admin/add-user', methods=['POST'])
 def add_user():
-    if 'role' in session and session['role'] == 'Admin':  # Ensure only Admin can add users
+    if 'role' in session and session['role'] == 'Admin':
         username = request.form['username']
         password = request.form['password']
         role = request.form['role']
@@ -290,12 +269,15 @@ def add_user():
         if existing_user:
             return "Error: Username already exists!", 400
 
+        # Generate a unique barcode
+        barcode = str(uuid.uuid4())[:12]  # Truncate UUID for shorter barcodes
+
         # Create a new user
-        new_user = User(username=username, password=password, role=role)
+        new_user = User(username=username, password=password, role=role, barcode=barcode)
         db.session.add(new_user)
         db.session.commit()
 
-        return redirect(url_for('user_management'))  # Redirect back to user management
+        return redirect(url_for('user_management'))
     return jsonify({'message': 'Unauthorized'}), 403
 
 @app.route('/admin/delete-user/<int:id>', methods=['POST'])
@@ -340,14 +322,14 @@ def user_management():
 @app.route('/supervisor/dashboard')
 def supervisor_dashboard():
     if 'role' in session and session['role'] == 'Supervisor':
-        return render_template('sale_management.html',session=session)
+        return render_template('supervisor_dashboard.html',session=session)
     return redirect(url_for('login'))
 
 # Salesman Dashboard
 @app.route('/salesman/dashboard')
 def salesman_dashboard():
     if 'role' in session and session['role'] == 'Salesman':
-        return render_template('salesman_dashboard.html',session=session)
+        return redirect(url_for('sale_management'))
     return redirect(url_for('login'))
 
 from PIL import Image
@@ -361,11 +343,9 @@ def add_product():
                 brand_name = data['brand_name'].strip().replace(" ", "_")
                 brand_code = data['brand_code']
                 barcode = data['barcode']
-                invoice_rate = float(data['invoice_rate'])
-                mrp = float(data['mrp'])
-                selling_price = float(data['selling_price'])
                 brand_type = data['brand_type'].strip().replace(" ", "_")
                 brand_size = data['brand_size'].strip()
+                selling_price = float(data['selling_price'])
                 added_by = session.get('user_id')
 
                 # Handle image upload
@@ -375,22 +355,18 @@ def add_product():
                 if image_file and image_file.filename.split('.')[-1].lower() in app.config['ALLOWED_EXTENSIONS']:
                     filename = f"{brand_name}_{brand_type}_{brand_size}.png"
                     image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                    # Compress and save the image
                     save_compressed_image(image_file, image_path)
                 else:
                     image_path = "static/uploads/Default.png"
-
 
                 # Create product
                 new_product = Product(
                     brand_name=brand_name,
                     brand_code=brand_code,
                     barcode=barcode,
-                    invoice_rate=invoice_rate,
-                    mrp=mrp,
-                    selling_price=selling_price,
                     brand_type=brand_type,
                     brand_size=brand_size,
+                    selling_price=selling_price,
                     added_by=added_by,
                     image_path=image_path
                 )
@@ -402,9 +378,11 @@ def add_product():
                 db.session.rollback()
                 flash(f"Error adding product: {str(e)}", "danger")
             return redirect(request.referrer)
+
         return render_template('add_product.html')
     flash("Unauthorized access!", "danger")
     return redirect(url_for('login'))
+
 
 def save_compressed_image(image_file, path, resolution=(300, 300)):
     """
@@ -426,22 +404,18 @@ def import_products():
             return jsonify({'error': 'Invalid file type. Only .xlsx or .csv files are allowed.'}), 400
 
         try:
-            # Read the uploaded file into a DataFrame
             data = pd.read_excel(file) if file.filename.endswith('.xlsx') else pd.read_csv(file)
 
-            # Iterate through the rows to create Product objects
             for _, row in data.iterrows():
                 if not Product.query.filter_by(barcode=row['barcode']).first():
                     product = Product(
                         brand_name=row['brand_name'],
                         brand_code=row['brand_code'],
                         barcode=row['barcode'],
-                        invoice_rate=row['invoice_rate'],
-                        mrp=row['mrp'],
-                        selling_price=row['selling_price'],
                         brand_type=row['brand_type'],
                         brand_size=row['brand_size'],
-                        image_path="static/uploads/"+row['image_path'],
+                        selling_price=row.get('selling_price', 0.0),
+                        image_path=f"static/uploads/{row['image_path']}",
                         added_by=session.get('user_id')
                     )
                     db.session.add(product)
@@ -455,43 +429,26 @@ def import_products():
 
     return render_template('import_products.html')
 
+
 @app.route('/admin/export-products', methods=['GET'])
 def export_products():
-    # Ensure the static/files directory exists
     export_dir = os.path.join('static', 'files')
-    os.makedirs(export_dir, exist_ok=True)  # Create the directory if it doesn't exist
+    os.makedirs(export_dir, exist_ok=True)
 
-    file_path = os.path.join(export_dir, 'products_export.xlsx')  # Path for the Excel file
+    file_path = os.path.join(export_dir, 'products_export.xlsx')
 
-    # Fetch products from the database
     products = Product.query.all()
 
     if not products:
-        # If no products exist, create a template file
-        columns = [
-            'brand_name', 'brand_code', 'barcode', 'invoice_rate',
-            'mrp', 'selling_price', 'brand_type', 'brand_size', 'image_path'
-        ]
+        columns = ['brand_name', 'brand_code', 'barcode', 'brand_type', 'brand_size', 'selling_price', 'image_path']
         pd.DataFrame(columns=columns).to_excel(file_path, index=False, engine='xlsxwriter')
     else:
-        # Prepare data for export
-        data = [{
-            'brand_name': p.brand_name, 
-            'brand_code': p.brand_code,
-            'barcode': p.barcode, 
-            'invoice_rate': p.invoice_rate,
-            'mrp': p.mrp, 
-            'selling_price': p.selling_price,
-            'brand_type': p.brand_type, 
-            'brand_size': p.brand_size,
-            'image_path': p.image_path or ''
-        } for p in products]
-        # Convert to DataFrame and save to Excel
-        df = pd.DataFrame(data)
+        data = [vars(p) for p in products]
+        df = pd.DataFrame(data).drop('_sa_instance_state', axis=1)
         df.to_excel(file_path, index=False, engine='xlsxwriter')
 
-    # Send the file to the user as a downloadable attachment
     return send_file(file_path, as_attachment=True)
+
 
 @app.route('/admin/upload-images', methods=['GET', 'POST'])
 def upload_images():
@@ -539,66 +496,96 @@ def upload_images():
 
     return render_template('upload_images.html')
 
-
 @app.route('/admin/add-stock', methods=['GET', 'POST'])
 def add_stock():
     if 'role' in session and session['role'] in ['Admin', 'Supervisor']:
         if request.method == 'POST':
-            data = request.form
-            product_id = int(data['product_id'])
-            quantity = int(data['quantity'])
-            added_by = session['username']
-            date_added = datetime.now()
+            try:
+                data = request.form
+                product_id = int(data['product_id'])
+                quantity = int(data['quantity'])
+                invoice_rate = float(data['invoice_rate'])
+                mrp = float(data['mrp'])
+                added_by = session['username']
+                USE_FIXED_DATE = False  # Set to False for dynamic date logic
+                if USE_FIXED_DATE:
+                    date_added = datetime.strptime("2025-01-25", "%Y-%m-%d")
+                else:
+                    date_added = datetime.strptime(data['date_added'], '%Y-%m-%d') if 'date_added' in data else datetime.now()
 
-            # Update or insert stock
-            existing_stock = Stock.query.filter_by(product_id=product_id).first()
-            if existing_stock:
-                # Update existing stock
-                existing_stock.quantity += quantity
-            else:
-                # Add new stock record
-                stock_entry = Stock(product_id=product_id, quantity=quantity, added_by=added_by, date_added=date_added)
-                db.session.add(stock_entry)
 
-            # Add record to stock history
-            stock_history_entry = StockHistory(
-                product_id=product_id,
-                quantity=quantity,
-                added_by=added_by,
-                date_added=date_added
-            )
-            db.session.add(stock_history_entry)
+                # Check for existing stock with matching MRP and Invoice Rate
+                existing_stock = Stock.query.filter_by(
+                    product_id=product_id,
+                    invoice_rate=invoice_rate,
+                    mrp=mrp
+                ).first()
 
-            db.session.commit()
+                if existing_stock:
+                    # Update existing stock
+                    existing_stock.quantity += quantity
+                    existing_stock.date_added = date_added  # Update to the new date
+                else:
+                    # Add new stock record with a new price set
+                    new_stock = Stock(
+                        product_id=product_id,
+                        quantity=quantity,
+                        invoice_rate=invoice_rate,
+                        mrp=mrp,
+                        added_by=added_by,
+                        date_added=date_added
+                    )
+                    db.session.add(new_stock)
+
+                # Add record to StockHistory
+                stock_history_entry = StockHistory(
+                    product_id=product_id,
+                    quantity=quantity,
+                    invoice_rate=invoice_rate,
+                    mrp=mrp,
+                    added_by=added_by,
+                    date_added=date_added
+                )
+                db.session.add(stock_history_entry)
+
+                db.session.commit()
+                flash("Stock added successfully!", "success")
+            except Exception as e:
+                db.session.rollback()
+                flash(f"Error adding stock: {str(e)}", "danger")
             return redirect(url_for('add_stock'))
 
-        barcode = request.args.get('barcode', '')
-        brand_code = request.args.get('brand_code', '')
+        # Load product details and most recent stock prices for selection
+        products = db.session.query(
+            Product.id,
+            Product.brand_name,
+            Product.brand_code,
+            Product.barcode,
+            Product.brand_type,
+            Product.brand_size,
+            Product.image_path,
+            Product.selling_price,  # Include selling price
+            db.func.max(Stock.invoice_rate).label('recent_invoice_rate'),
+            db.func.max(Stock.mrp).label('recent_mrp')
+        ).join(Stock, Stock.product_id == Product.id, isouter=True).group_by(Product.id).all()
 
-        if barcode:
-            products = Product.query.filter(Product.barcode == barcode).all()
-        elif brand_code:
-            products = Product.query.filter(Product.brand_code == brand_code).all()
-        else:
-            products = Product.query.all()
-
-        # Convert products to JSON-serializable dictionaries
         product_dicts = [
             {
                 "id": product.id,
                 "brand_name": product.brand_name,
                 "brand_code": product.brand_code,
                 "barcode": product.barcode,
-                "mrp": product.mrp,
-                "selling_price": product.selling_price,
                 "brand_type": product.brand_type,
                 "brand_size": product.brand_size,
                 "image_path": product.image_path,
+                "selling_price": product.selling_price,  # Add to the frontend
+                "invoice_rate": product.recent_invoice_rate or "Undefined",
+                "mrp": product.recent_mrp or "Undefined",
             }
             for product in products
         ]
 
-        return render_template('add_stock.html', products=product_dicts, barcode=barcode, brand_code=brand_code)
+        return render_template('add_stock.html', products=product_dicts, today=datetime.now().strftime('%Y-%m-%d'))
     return jsonify({'message': 'Unauthorized'}), 403
 
 @app.route('/admin/view-products', methods=['GET'])
@@ -606,6 +593,7 @@ def view_products():
     products = Product.query.all()
     brand_types = {product.brand_type for product in products}
     brand_sizes = {product.brand_size for product in products}
+    selling_prices = [product.selling_price for product in products]
 
     serialized_products = [
         {
@@ -615,10 +603,8 @@ def view_products():
             "brand_size": product.brand_size,
             "brand_code": product.brand_code,
             "barcode": product.barcode,
-            "invoice_rate": product.invoice_rate,
-            "mrp": product.mrp,
-            "selling_price": product.selling_price,
-            "image_path": product.image_path or ''
+            "image_path": product.image_path or '',
+            "selling_price": product.selling_price  # Include selling price
         }
         for product in products
     ]
@@ -628,9 +614,11 @@ def view_products():
         products=serialized_products,
         filters={
             'types': sorted(brand_types),
-            'sizes': sorted(brand_sizes)
+            'sizes': sorted(brand_sizes),
+            'selling_price_range': (min(selling_prices), max(selling_prices))  # Min and max selling price
         }
     )
+
 
 @app.route('/admin/view-stock', methods=['GET'])
 def view_stock():
@@ -641,27 +629,94 @@ def view_stock():
             Product.brand_name,
             Product.brand_code,
             Product.barcode,
-            Product.invoice_rate,
-            Product.mrp,
-            Product.selling_price,
             Product.brand_type,
             Product.brand_size,
             Product.image_path,
+            Product.selling_price,
             db.func.sum(Stock.quantity).label('total_stock')
         ).join(Stock, Stock.product_id == Product.id).group_by(Product.id).all()
+
+        # Fetch stock details grouped by product and pricing
+        stock_sets = db.session.query(
+            Stock.product_id,
+            Stock.invoice_rate,
+            Stock.mrp,
+            db.func.sum(Stock.quantity).label('quantity'),
+            Stock.date_added
+        ).group_by(Stock.product_id, Stock.invoice_rate, Stock.mrp, Stock.date_added).all()
+
+        # Organize stock sets by product
+        stock_sets_by_product = {}
+        for stock in stock_sets:
+            if stock.product_id not in stock_sets_by_product:
+                stock_sets_by_product[stock.product_id] = []
+            stock_sets_by_product[stock.product_id].append({
+                "invoice_rate": stock.invoice_rate,
+                "mrp": stock.mrp,
+                "quantity": stock.quantity,
+                "date_added": stock.date_added.strftime('%d-%m-%Y %H:%M:%S')
+            })
+
+        # Prepare product data for the frontend
+        product_dicts = []
+        for product in products:
+            product_data = dict(product._mapping)
+            product_data["stock_sets"] = stock_sets_by_product.get(product.id, [])
+            product_dicts.append(product_data)
 
         # Generate filters dynamically
         filters = {
             "types": [type_[0] for type_ in db.session.query(Product.brand_type).distinct().all()],
             "sizes": [size[0] for size in db.session.query(Product.brand_size).distinct().all()],
+            "price_range": (
+                min(p.selling_price for p in products),
+                max(p.selling_price for p in products),
+            )
         }
-
-        # Convert products for JSON serialization
-        product_dicts = [dict(product._mapping) for product in products]
 
         return render_template('view_stock.html', products=product_dicts, filters=filters)
     return jsonify({'message': 'Unauthorized'}), 403
 
+@app.route('/admin/export-stock', methods=['GET'])
+def export_stock():
+    if 'role' in session and session['role'] in ['Admin', 'Supervisor']:
+        # Fetch stock data in database order
+        stock_data = db.session.query(
+            Product.brand_code,
+            Product.brand_name,
+            Product.brand_size,
+            Product.selling_price,
+            Stock.invoice_rate,
+            Stock.mrp,
+            db.func.sum(Stock.quantity).label('quantity')
+        ).join(Stock, Stock.product_id == Product.id).group_by(
+            Product.id, Stock.invoice_rate, Stock.mrp
+        ).all()
+
+        # Prepare the CSV
+        csv_file = StringIO()
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(['Brand Code', 'Product Name', 'Size', 'Selling Price', 'Invoice Rate', 'MRP', 'Quantity'])
+
+        for row in stock_data:
+            csv_writer.writerow([
+                row.brand_code,
+                row.brand_name,
+                f"{row.brand_size}ml",
+                f"{row.selling_price:.2f}",
+                f"{row.invoice_rate:.2f}",
+                f"{row.mrp:.2f}",
+                row.quantity, 
+            ])
+
+        # Return the CSV file
+        csv_file.seek(0)
+        return Response(
+            csv_file.getvalue(),
+            mimetype='text/csv',
+            headers={"Content-Disposition": "attachment; filename=stock_data.csv"},
+        )
+    return jsonify({'message': 'Unauthorized'}), 403
 
 @app.route('/admin/stock-history', methods=['GET'])
 def stock_history():
@@ -675,6 +730,8 @@ def stock_history():
             Product.brand_type,
             Product.brand_size,
             StockHistory.quantity,
+            StockHistory.invoice_rate,
+            StockHistory.mrp,
             StockHistory.date_added,
             StockHistory.added_by
         ).join(Product, StockHistory.product_id == Product.id).order_by(StockHistory.date_added.desc()).all()
@@ -688,6 +745,8 @@ def stock_history():
             'brand_type': h.brand_type,
             'brand_size': h.brand_size,
             'quantity': h.quantity,
+            'invoice_rate': h.invoice_rate,
+            'mrp': h.mrp,
             'date_added': h.date_added.strftime('%d-%m-%Y %I:%M %p'),  # Date in DD-MM-YYYY, Time in 12-hour format
             'added_by': h.added_by
         } for h in stock_history]
@@ -707,12 +766,19 @@ def revoke_stock():
         if not history_entry:
             return jsonify({'error': 'Stock history entry not found'}), 404
 
-        # Update the stock quantity
-        stock_entry = Stock.query.filter_by(product_id=product_id).first()
+        # Find the specific stock record with matching invoice rate and MRP
+        stock_entry = Stock.query.filter_by(
+            product_id=product_id,
+            invoice_rate=history_entry.invoice_rate,
+            mrp=history_entry.mrp
+        ).first()
+
         if stock_entry:
             stock_entry.quantity -= history_entry.quantity
-            if stock_entry.quantity < 0:
-                stock_entry.quantity = 0  # Ensure stock is not negative
+            if stock_entry.quantity <= 0:
+                db.session.delete(stock_entry)  # Remove stock entry if quantity is zero or less
+        else:
+            return jsonify({'error': 'Matching stock entry not found'}), 404
 
         # Delete the history entry
         db.session.delete(history_entry)
@@ -721,13 +787,27 @@ def revoke_stock():
         return jsonify({'message': 'Stock addition revoked successfully'})
     return jsonify({'error': 'Unauthorized'}), 403
 
+
 @app.template_filter('to12hr')
 def to12hr(value):
+    """
+    Convert a 24-hour time string to 12-hour format with AM/PM.
+    """
     try:
         from datetime import datetime
         return datetime.strptime(value, "%H:%M:%S").strftime("%I:%M %p")
     except ValueError:
         return value
+    
+@app.template_filter('datetimeformat')
+def datetimeformat(value):
+    """
+    Custom filter to format datetime in 'DD-MMM-YYYY HH:MM AM/PM' format.
+    """
+    if isinstance(value, datetime):
+        return value.strftime('%d-%b-%Y %I:%M %p')
+    return value
+
 
 @app.route('/admin/edit-product/<int:id>', methods=['GET', 'POST'])
 def edit_product(id):
@@ -738,21 +818,19 @@ def edit_product(id):
             product.brand_name = data['brand_name']
             product.brand_code = data['brand_code']
             product.barcode = data['barcode']
-            product.invoice_rate = float(data['invoice_rate'])
-            product.mrp = float(data['mrp'])
-            product.selling_price = float(data['selling_price'])
             product.brand_type = data['brand_type']
             product.brand_size = data['brand_size']
+            product.selling_price = data['selling_price']
 
             # Handle image upload (optional for editing)
             image_file = request.files.get('image')
             if image_file:
-                if image_file.filename.split('.')[-1].lower() in app.config['ALLOWED_EXTENSIONS']:
-                    filename = secure_filename(image_file.filename)
+                if image_file and image_file.filename.split('.')[-1].lower() in app.config['ALLOWED_EXTENSIONS']:
+                    filename = f"{data['brand_name']}_{data['brand_type']}_{data['brand_size']}.png"
                     image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                    image_file.save(image_path)
+                    save_compressed_image(image_file, image_path)
                     product.image_path = image_path
-
+                
             db.session.commit()
             return redirect(url_for('view_products'))
         return render_template('edit_product.html', product=product)
@@ -781,11 +859,10 @@ def delete_product(id):
     flash("Unauthorized access.", "danger")
     return redirect(url_for('view_products'))
 
+
 @app.route('/sales/manage', methods=['GET'])
 def sale_management():
-    # Fetch all products
     products = Product.query.all()
-
     serialized_products = [
         {
             "id": product.id,
@@ -796,342 +873,612 @@ def sale_management():
             "barcode": product.barcode,
             "selling_price": product.selling_price,
             "quantity": sum(stock.quantity for stock in product.stocks),
-            "image_path": product.image_path if product.image_path.startswith('static/') else f'static/uploads/{product.image_path}',
+            "image_path": product.image_path,
         }
         for product in products
     ]
 
-    # Get the existing sale list from the session
     sale_list = session.get('sale_list', {})
-    grand_total = 0  # Initialize grand total
+    grand_total = sum(
+        details["selling_price"] * details["quantity"]
+        for details in sale_list.values()
+    )
 
-    for product_id, details in sale_list.items():
-        # Build the item name and handle missing fields
-        details['brand_type'] = details.get('brand_type', 'Unknown Type')
-        details['brand_size'] = details.get('brand_size', 'Unknown Size')
-        details['item_name'] = f"{details['brand_name']} {details['brand_type']} {details['brand_size']}"
-        details['total_price'] = details['quantity'] * details['selling_price']  # Calculate total price
-        grand_total += details['total_price']  # Accumulate grand total
+    today = datetime.now()  # Get the current date
 
     return render_template(
-        'sale_management.html',
+        "sale_management.html",
         products=serialized_products,
         sale_list=sale_list,
-        grand_total=grand_total
+        grand_total=grand_total,
+        today=today  # Pass the current date to the template
     )
 
 
 @app.route('/sales/add-product', methods=['POST'])
 def add_product_to_sale():
-    data = request.get_json() or {}
-    product_id = data.get('product_id')
-    barcode = data.get('barcode')
+    data = request.get_json()
+    product_id = data.get("product_id")
+    quantity_to_add = data.get("quantity", 1)
 
-    if 'sale_list' not in session:
-        session['sale_list'] = {}
+    if not isinstance(quantity_to_add, int) or quantity_to_add <= 0:
+        message = "Invalid quantity specified."
+        return jsonify({"error": message}), 400
 
-    sale_list = session['sale_list']
+    if "sale_list" not in session:
+        session["sale_list"] = {}
 
-    # Find product by ID or barcode
-    product = None
-    if product_id:
-        product = db.session.get(Product, product_id)
-    elif barcode:
-        matching_products = Product.query.filter_by(barcode=barcode).all()
-        if len(matching_products) == 1:
-            product = matching_products[0]
-        elif len(matching_products) > 1:
-            return jsonify({'error': 'Multiple products match this barcode. Please refine the input.'}), 400
+    sale_list = session["sale_list"]
 
-    if not product:
-        return jsonify({'error': 'Product not found'}), 404
+    # Fetch available stock for the product
+    stock_entries = Stock.query.filter_by(product_id=product_id).order_by(Stock.date_added).all()
+    available_quantity = sum(stock.quantity for stock in stock_entries)
 
-    total_stock = sum(stock.quantity for stock in product.stocks)
-    str_product_id = str(product.id)
-    if str_product_id in sale_list:
-        existing_quantity = sale_list[str_product_id]['quantity']
-        if existing_quantity + 1 > total_stock:
-            return jsonify({'error': f'Not enough stock for {product.brand_name}'}), 400
-        sale_list[str_product_id]['quantity'] += 1
-    else:
-        if total_stock < 1:
-            return jsonify({'error': f'No stock available for {product.brand_name}'}), 400
-        sale_list[str_product_id] = {
-            'brand_name': product.brand_name,
-            'brand_type': product.brand_type,
-            'brand_size': product.brand_size,
-            'brand_code': product.brand_code,
-            'barcode': product.barcode,
-            'selling_price': product.selling_price,
-            'quantity': 1,
-            'item_name': f"{product.brand_name} {product.brand_type} {product.brand_size}",
-            # Ensure correct image path
-            'image_path': product.image_path if product.image_path.startswith('static/') else f'static/uploads/{product.image_path}',
+    if available_quantity < quantity_to_add:
+        message = "Not enough stock available."
+        return jsonify({"error": message}), 400
+
+    sale_item_key = str(product_id)
+
+    # Admin Logic
+    if session.get('role') == 'Admin':
+        sale_list[sale_item_key] = {
+            "product_id": product_id,
+            "brand_name": stock_entries[0].product.brand_name,
+            "brand_type": stock_entries[0].product.brand_type,
+            "brand_size": stock_entries[0].product.brand_size,
+            "selling_price": stock_entries[0].product.selling_price,
+            "quantity": min(quantity_to_add, available_quantity),  # Enforce max stock limit
         }
+    else:
+        # Regular User Logic
+        current_quantity = sale_list.get(sale_item_key, {}).get("quantity", 0)
+        if current_quantity + quantity_to_add > available_quantity:
+            message = "Not enough stock available for this quantity."
+            return jsonify({"error": message}), 400
 
-    session['sale_list'] = sale_list
+        if sale_item_key in sale_list:
+            sale_list[sale_item_key]["quantity"] += quantity_to_add
+        else:
+            sale_list[sale_item_key] = {
+                "product_id": product_id,
+                "brand_name": stock_entries[0].product.brand_name,
+                "brand_type": stock_entries[0].product.brand_type,
+                "brand_size": stock_entries[0].product.brand_size,
+                "selling_price": stock_entries[0].product.selling_price,
+                "quantity": quantity_to_add,
+            }
 
-    return jsonify({'message': 'Product added successfully', 'sale_list': sale_list})
+    session["sale_list"] = sale_list
+    message = f"Successfully added {quantity_to_add} items to the sale list."
+    return jsonify({"message": message, "sale_list": sale_list})
+
+@app.route('/sales/update-quantity', methods=['POST'])
+def update_quantity():
+    data = request.get_json()
+    sale_item_key = data.get("sale_item_key")
+    new_quantity = data.get("quantity")
+    new_quantity = int(new_quantity)
+
+    # Validate new_quantity is a positive integer
+    if not isinstance(new_quantity, int) or new_quantity <= 0:
+        return jsonify({"error": "Invalid quantity specified."}), 400
+
+    # Get the current sale list from the session
+    sale_list = session.get("sale_list", {})
+    if sale_item_key not in sale_list:
+        return jsonify({"error": "Product not found in sale list."}), 404
+
+    # Fetch product ID and validate stock availability
+    product_id = sale_list[sale_item_key]["product_id"]
+    stock_entries = Stock.query.filter_by(product_id=product_id).order_by(Stock.date_added).all()
+    available_quantity = sum(stock.quantity for stock in stock_entries)
+
+    # Ensure new_quantity does not exceed available stock
+    if new_quantity > available_quantity:
+        return jsonify({"error": "Not enough stock available to set this quantity."}), 400
+
+    # Update the sale list
+    sale_list[sale_item_key]["quantity"] = new_quantity
+    session["sale_list"] = sale_list
+
+    return jsonify({"message": "Quantity updated successfully.", "sale_list": sale_list})
+
 
 @app.route('/sales/remove-product', methods=['POST'])
 def remove_product_from_sale():
-    data = request.get_json()  # Get the JSON payload
-    product_id = data.get('product_id')  # Extract product_id
+    data = request.get_json()
+    sale_item_key = data.get("sale_item_key")
 
-    if not product_id:
-        return jsonify({'error': 'Product ID is required'}), 400
+    if not sale_item_key:
+        return jsonify({"error": "Sale item key is required."}), 400
 
-    # Load the sale list from the session
-    sale_list = session.get('sale_list', {})
+    sale_list = session.get("sale_list", {})
 
-    product_id = str(product_id)  # Ensure product_id is a string
-    if product_id in sale_list:
-        if sale_list[product_id]['quantity'] > 1:
-            sale_list[product_id]['quantity'] -= 1  # Decrease quantity by 1
-        else:
-            del sale_list[product_id]  # Remove product if quantity reaches zero
+    if sale_item_key in sale_list:
+        sale_list[sale_item_key]["quantity"] -= 1
+        if sale_list[sale_item_key]["quantity"] <= 0:
+            del sale_list[sale_item_key]
 
-        session['sale_list'] = sale_list  # Update the session
-        return jsonify({'message': 'Product updated successfully', 'sale_list': sale_list})
-    else:
-        return jsonify({'error': 'Product not found in sale list'}), 404
+        session["sale_list"] = sale_list
+        return jsonify({"message": "Product removed successfully.", "sale_list": sale_list})
 
+    return jsonify({"error": "Product not found in sale list."}), 404
 
 @app.route('/sales/confirm-sale', methods=['POST'])
 def confirm_sale():
-    if 'sale_list' not in session:
-        return jsonify({'error': 'No sale list to confirm'}), 400
+    if "sale_list" not in session:
+        return jsonify({"error": "No sale list to confirm."}), 400
 
-    sale_list = session['sale_list']
-    user_id = session.get('user_id')
+    sale_list = session["sale_list"]
+    user_id = session.get("username")  # Ensure `username` matches user logic
 
-    for product_id, details in sale_list.items():
-        product_id = int(product_id)
-        quantity = details['quantity']
-        selling_price = details['selling_price']
+    # Get the sale date from the request; default to today if not provided
+    data = request.get_json()
+    sale_date = data.get("sale_date")
 
-        # Deduct from stock
-        stock_entry = Stock.query.filter_by(product_id=product_id).first()
-        if stock_entry and stock_entry.quantity >= quantity:
-            stock_entry.quantity -= quantity
-        else:
-            return jsonify({'error': f'Not enough stock for {details["brand_name"]}'}), 400
+    USE_FIXED_DATE = False  # Set to False for dynamic date logic
+    if USE_FIXED_DATE:
+        sale_date = datetime.strptime("2025-01-25", "%Y-%m-%d")
+    else:
+        sale_date = datetime.strptime(sale_date, "%Y-%m-%d") if sale_date else datetime.now()
 
-        # Add sale record with the current local time
-        total_price = quantity * selling_price
-        sale = Sale(
-            product_id=product_id,
-            user_id=user_id,
-            quantity=quantity,
-            total_price=total_price,
-            date_sold=datetime.now()  # Record the correct time
-        )
-        db.session.add(sale)
+    for sale_item_key, details in sale_list.items():
+        product_id = details["product_id"]
+        quantity_to_deduct = details["quantity"]
+
+        # Fetch stock entries for the product (FIFO)
+        stock_entries = Stock.query.filter_by(product_id=product_id).order_by(Stock.date_added).all()
+
+        remaining_quantity = quantity_to_deduct
+
+        for stock_entry in stock_entries:
+            if remaining_quantity <= 0:
+                break
+
+            deduct_quantity = min(remaining_quantity, stock_entry.quantity)
+            if deduct_quantity > 0:
+                sale = Sale(
+                    product_id=product_id,
+                    user_id=user_id,
+                    quantity=deduct_quantity,
+                    total_price=deduct_quantity * details["selling_price"],
+                    date_sold=sale_date,  # Use the selected or default date
+                    invoice_rate=stock_entry.invoice_rate,
+                    mrp=stock_entry.mrp,
+                    selling_price=details["selling_price"],
+                    profit=(details["selling_price"] - stock_entry.invoice_rate) * deduct_quantity,
+                )
+                db.session.add(sale)
+
+                stock_entry.quantity -= deduct_quantity
+                remaining_quantity -= deduct_quantity
+
+        if remaining_quantity > 0:
+            return jsonify({"error": "Stock mismatch detected. Sale cannot be processed."}), 400
 
     db.session.commit()
+    session.pop("sale_list", None)
 
-    # Clear the sale list
-    session.pop('sale_list', None)
+    return jsonify({"message": "Sale confirmed successfully."})
 
-    return jsonify({'message': 'Sale confirmed successfully'})
 
 @app.route('/sales/reject-sale', methods=['POST'])
 def reject_sale():
-    session.pop('sale_list', None)
-    return jsonify({'message': 'Sale list cleared successfully'})
+    if "sale_list" in session:
+        session.pop("sale_list", None)
 
-@app.route('/admin/view-sales', methods=['GET'])
+    message = "Sale list cleared successfully."
+    return jsonify({"message": message})
+
+@app.route('/sales/view-sales', methods=['GET'])
 def view_sales():
     if session.get('role') not in ['Admin', 'Supervisor', 'Salesman']:
         return jsonify({'error': 'Unauthorized'}), 403
 
-    # Fetch all sales ordered by date_sold in descending order
+    # Fetch all sales records with related data
     sales = Sale.query.join(Product, Sale.product_id == Product.id)\
-        .join(User, Sale.user_id == User.id)\
+        .join(User, Sale.user_id == User.username)\
         .order_by(Sale.date_sold.desc()).all()
 
+    # Serialize sales data
     serialized_sales = [
         {
             "id": sale.id,
             "brand_name": sale.product.brand_name,
             "brand_type": sale.product.brand_type,
             "brand_size": sale.product.brand_size,
-            "brand_code": sale.product.brand_code,
             "quantity": sale.quantity,
-            "seller": sale.user.username,
-            "date_sold": sale.date_sold.strftime('%d-%m-%Y %I:%M %p'),
+            "selling_price": sale.selling_price,
+            "total_price": sale.total_price,
+            "date_sold": sale.date_sold.strftime('%Y-%m-%d'),
+            "time_sold": sale.date_sold.strftime('%I:%M %p'),
+            "added_by": sale.user_id,  # Username of the user who added the sale
         }
         for sale in sales
     ]
-    return render_template('view_sales.html', sales=serialized_sales)
+
+    # Calculate grand totals
+    grand_total_sales = sum(sale["total_price"] for sale in serialized_sales)
+
+    return render_template(
+        'view_sales.html',
+        sales=serialized_sales,
+        grand_total_sales=grand_total_sales,
+    )
 
 
-
-@app.route('/admin/edit-sale', methods=['POST'])
-def edit_sale():
+@app.route('/sales/revoke', methods=['POST'])
+def revoke_sale():
     if session.get('role') != 'Admin':
         return jsonify({'error': 'Unauthorized'}), 403
 
     data = request.get_json()
     sale_id = data.get('sale_id')
-    new_quantity = int(data.get('new_quantity'))  # Convert new_quantity to integer
+    new_quantity = int(data.get('new_quantity'))
 
     # Fetch the sale record
     sale = Sale.query.get(sale_id)
     if not sale:
         return jsonify({'error': 'Sale record not found'}), 404
 
-    # Fetch the stock entry
-    stock_entry = Stock.query.filter_by(product_id=sale.product_id).first()
-    if not stock_entry:
-        return jsonify({'error': 'Stock entry not found'}), 404
+    stock_entries = Stock.query.filter_by(
+        product_id=sale.product_id,
+        invoice_rate=sale.invoice_rate,
+        mrp=sale.mrp
+    ).order_by(Stock.date_added).all()
 
-    # Calculate the difference
     quantity_difference = new_quantity - sale.quantity
 
-    if quantity_difference > 0:
-        # Check if enough stock is available
-        if stock_entry.quantity < quantity_difference:
-            return jsonify({'error': 'Not enough stock available to increase sale quantity'}), 400
-        stock_entry.quantity -= quantity_difference  # Reduce stock
-    elif quantity_difference < 0:
-        stock_entry.quantity += abs(quantity_difference)  # Add back to stock
+    if quantity_difference > 0:  # Increase sale quantity
+        remaining_quantity = quantity_difference
+        for stock in stock_entries:
+            if remaining_quantity <= 0:
+                break
+            if stock.quantity >= remaining_quantity:
+                stock.quantity -= remaining_quantity
+                remaining_quantity = 0
+            else:
+                remaining_quantity -= stock.quantity
+                stock.quantity = 0
 
-    # Update the sale record
+        if remaining_quantity > 0:
+            db.session.rollback()
+            return jsonify({'error': 'Not enough stock available to increase sale quantity.'}), 400
+
+    elif quantity_difference < 0:  # Decrease sale quantity
+        remaining_quantity = abs(quantity_difference)
+        for stock in stock_entries:
+            if remaining_quantity <= 0:
+                break
+            stock.quantity += min(stock.quantity, remaining_quantity)
+            remaining_quantity = 0
+
+    # Update sale record
     sale.quantity = new_quantity
+    sale.total_price = new_quantity * sale.selling_price
+    sale.profit = sale.total_price - (new_quantity * sale.invoice_rate)
+
     db.session.commit()
 
-    return jsonify({'message': 'Sale updated successfully.'})
+    return jsonify({'message': 'Sale quantity updated successfully.'})
+
 
 @app.route('/daily-report', methods=['GET'])
 def daily_report():
-    today = datetime.now().date()
-    report_data, grand_total_sales_by_type, grand_total_sale = generate_daily_report_data()
-    return render_template('daily_report2.html', 
-                           report_data=report_data,
-                           grand_total_sales_by_type = grand_total_sales_by_type,
-                           grand_total_sale = grand_total_sale, 
-                           today=today)
+    requested_date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
+    requested_date = datetime.strptime(requested_date, '%Y-%m-%d').date()
 
+    # Check if report exists for the requested date
+    daily_report = DailyReport.query.filter_by(report_date=requested_date).first()
 
-@app.route('/export/pdf', methods=['GET'])
-def export_to_pdf():
-    today = datetime.now().date()
-    report_data, grand_total_sales_by_type, grand_total_sale = generate_daily_report_data()
+    if daily_report and requested_date != datetime.now().date():
+        # Use stored report for past dates
+        report_data = daily_report.report_data
+        total_sales_by_type = daily_report.total_sales_by_type
+        total_profit_by_type = daily_report.total_profit_by_type  # ✅ Fetch stored profit data
+        grand_total_sale = daily_report.grand_total_sale
+        grand_total_profit = daily_report.grand_total_profit  # ✅ Fetch stored grand profit
+    else:
+        # Generate report for today or if no stored report is found
+        report_data, total_sales_by_type, total_profit_by_type, grand_total_sale, grand_total_profit = generate_report_data(requested_date)
 
-    # Render the updated report HTML
-    rendered_html = render_template(
-        'daily_report2.html',
+        # Store report if it's today's date
+        if requested_date == datetime.now().date():
+            if daily_report:
+                # Update existing entry
+                daily_report.report_data = report_data
+                daily_report.total_sales_by_type = total_sales_by_type
+                daily_report.total_profit_by_type = total_profit_by_type  # ✅ Store profit data
+                daily_report.grand_total_sale = grand_total_sale
+                daily_report.grand_total_profit = grand_total_profit  # ✅ Store grand total profit
+            else:
+                # Create a new entry
+                new_report = DailyReport(
+                    report_date=requested_date,
+                    report_data=report_data,
+                    total_sales_by_type=total_sales_by_type,
+                    total_profit_by_type=total_profit_by_type,  # ✅ Store profit data
+                    grand_total_sale=grand_total_sale,
+                    grand_total_profit=grand_total_profit  # ✅ Store grand total profit
+                )
+                db.session.add(new_report)
+            db.session.commit()
+
+    return render_template(
+        'daily_report.html',
+        today=requested_date,
         report_data=report_data,
-        grand_total_sales_by_type=grand_total_sales_by_type,
+        total_sales_by_type=total_sales_by_type,
+        total_profit_by_type=total_profit_by_type,  # ✅ Pass profit data to template
         grand_total_sale=grand_total_sale,
-        today=today
+        grand_total_profit=grand_total_profit  # ✅ Pass grand total profit
     )
 
-    # Convert the rendered HTML to PDF
-    pdf_output = io.BytesIO()
-    pisa_status = pisa.CreatePDF(io.BytesIO(rendered_html.encode('utf-8')), dest=pdf_output)
 
-    if pisa_status.err:
-        return "Error: Unable to generate PDF", 500
+def generate_report_data(requested_date):
+    report_data = {}
+    total_sales_by_type = {}
+    total_profit_by_type = {}  # Store brand type-wise profit
+    grand_total_sale = 0
+    grand_total_profit = 0  # Store total profit across all products
 
-    response = make_response(pdf_output.getvalue())
-    response.headers['Content-Type'] = 'application/pdf'
-    response.headers['Content-Disposition'] = f'attachment; filename="daily_report_{today}.pdf"'
-    return response
+    products = Product.query.all()
+    for product in products:
+        if product.brand_type not in report_data:
+            report_data[product.brand_type] = {}
 
-@app.route('/export/excel', methods=['GET'])
-def export_to_excel():
-    today = datetime.now().date()
-    report_data, grand_total_sales_by_type, grand_total_sale = generate_daily_report_data()
+        if product.brand_name not in report_data[product.brand_type]:
+            report_data[product.brand_type][product.brand_name] = {
+                "sizes": {},
+                "total": {"ob": 0, "cb": 0, "sale": 0, "amount": 0, "new_stock": 0, "profit": 0},
+            }
 
-    rows = []
-    for brand_type, total_sale in grand_total_sales_by_type.items():
-        rows.append({"Brand Type": brand_type, "Total Sale (₹)": total_sale})
-
-    rows.append({"Brand Type": "Grand Total", "Total Sale (₹)": grand_total_sale})
-
-    df = pd.DataFrame(rows)
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name=f"Daily Report {today}")
-
-    response = make_response(output.getvalue())
-    response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    response.headers['Content-Disposition'] = f'attachment; filename="daily_report_{today}.xlsx"'
-    return response
-
-@app.route('/admin/trade-stock', methods=['POST'])
-def trade_stock():
-    try:
-        data = request.get_json()
-        product_id = data.get('product_id')
-        bar_name = data.get('bar_name')
-        person_name = data.get('person_name')
-        quantity = data.get('quantity')
-        trade_type = data.get('trade_type')
-
-        product = Product.query.get(product_id)
-        if not product:
-            return jsonify({'error': 'Product not found'}), 404
-
-        stock_value = product.invoice_rate * quantity
-        mrp_value = product.mrp * quantity
-        selling_price_value = product.selling_price * quantity
-
-        # Update Stock
-        stock_entry = Stock.query.filter_by(product_id=product_id).first()
-        if not stock_entry:
-            return jsonify({'error': 'No stock available for this product'}), 404
-
-        if trade_type == 'borrow':
-            if stock_entry.quantity < quantity:
-                return jsonify({'error': 'Insufficient stock to borrow'}), 400
-            stock_entry.quantity -= quantity
-        elif trade_type == 'lend':
-            stock_entry.quantity += quantity
-        else:
-            return jsonify({'error': 'Invalid trade type'}), 400
-
-        # Create a trade record
-        trade = TradeRecord(
-            product_id=product_id,
-            bar_name=bar_name,
-            person_name=person_name,
-            quantity=quantity,
-            trade_type=trade_type,
-            stock_value=stock_value,
-            mrp_value=mrp_value,
-            selling_price_value=selling_price_value,
+        # Fetch current stock for this product
+        current_stock = (
+            db.session.query(func.sum(Stock.quantity))
+            .filter(Stock.product_id == product.id)
+            .scalar()
+            or 0
         )
-        db.session.add(trade)
+
+        # Fetch today's sales
+        today_sales = (
+            db.session.query(func.sum(Sale.quantity))
+            .filter(
+                Sale.product_id == product.id,
+                func.date(Sale.date_sold) == requested_date
+            )
+            .scalar()
+            or 0
+        )
+
+        # Fetch today's stock additions
+        today_stock_added = (
+            db.session.query(func.sum(StockHistory.quantity))
+            .filter(
+                StockHistory.product_id == product.id,
+                func.date(StockHistory.date_added) == requested_date
+            )
+            .scalar()
+            or 0
+        )
+
+        # Fetch today's profit
+        today_profit = (
+            db.session.query(func.sum(Sale.profit))
+            .filter(
+                Sale.product_id == product.id,
+                func.date(Sale.date_sold) == requested_date
+            )
+            .scalar()
+            or 0
+        )
+
+        # Calculate OB and CB
+        ob = current_stock + today_sales - today_stock_added
+        cb = current_stock
+
+        # Calculate sale and amount
+        sale = today_sales
+        amount = sale * product.selling_price
+
+        # Update brand data
+        report_data[product.brand_type][product.brand_name]["sizes"][product.brand_size] = {
+            "ob": ob,
+            "cb": cb,
+            "sale": sale,
+            "amount": amount,
+            "new_stock": today_stock_added,
+            "profit": today_profit,  # Include profit per product size
+        }
+
+        # Update totals
+        totals = report_data[product.brand_type][product.brand_name]["total"]
+        totals["ob"] += ob
+        totals["cb"] += cb
+        totals["sale"] += sale
+        totals["amount"] += amount
+        totals["new_stock"] += today_stock_added
+        totals["profit"] += today_profit  # Include profit in total
+
+        # Update brand type-wise profit
+        total_sales_by_type[product.brand_type] = total_sales_by_type.get(product.brand_type, 0) + amount
+        total_profit_by_type[product.brand_type] = total_profit_by_type.get(product.brand_type, 0) + today_profit
+
+        # Update grand totals
+        grand_total_sale += amount
+        grand_total_profit += today_profit
+
+    return report_data, total_sales_by_type, total_profit_by_type, grand_total_sale, grand_total_profit
+
+@app.route('/admin/data-management', methods=['GET', 'POST'])
+def data_management():
+    """
+    View and manage data for various models.
+    """
+    if request.method == 'POST':
+        data_type = request.form.get('data_type')
+        if not data_type or data_type not in MODEL_CLASSES:
+            flash("Invalid data type selected.", "danger")
+            return redirect(url_for('data_management'))
+
+        model_class = MODEL_CLASSES[data_type]
+        records = model_class.query.all()
+        columns = [col.name for col in model_class.__table__.columns]
+
+        # Convert records into dictionaries
+        data = [
+            {col: getattr(record, col) for col in columns} for record in records
+        ]
+
+        return render_template(
+            'data_management.html',
+            data_type=data_type,
+            data=data,
+            columns=columns,
+        )
+
+    return render_template('data_management.html')
+
+
+@app.route('/admin/edit-record/<string:data_type>/<int:record_id>', methods=['GET', 'POST'])
+def edit_record(data_type, record_id):
+    """
+    Fetch or update a specific record based on the data type.
+    """
+    if data_type not in MODEL_CLASSES:
+        return jsonify({"success": False, "error": "Invalid data type."}), 400
+
+    model_class = MODEL_CLASSES[data_type]
+    record = model_class.query.get(record_id)
+
+    if request.method == 'GET':
+        if not record:
+            return jsonify({"success": False, "error": "Record not found."}), 404
+
+        record_data = {
+            col.name: getattr(record, col.name)
+            for col in model_class.__table__.columns
+        }
+        return jsonify({"success": True, "record": record_data})
+
+    if request.method == 'POST':
+        data = request.get_json()
+        if not record:
+            return jsonify({"success": False, "error": "Record not found."}), 404
+
+        try:
+            for key, value in data.items():
+                setattr(record, key, value)
+            db.session.commit()
+            return jsonify({"success": True})
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/admin/delete-record/<string:data_type>/<int:record_id>', methods=['POST'])
+def delete_record(data_type, record_id):
+    """
+    Delete a record from the database.
+    """
+    if data_type not in MODEL_CLASSES:
+        return jsonify({"success": False, "error": "Invalid data type."}), 400
+
+    model_class = MODEL_CLASSES[data_type]
+    record = model_class.query.get(record_id)
+
+    if not record:
+        return jsonify({"success": False, "error": "Record not found."}), 404
+
+    try:
+        db.session.delete(record)
         db.session.commit()
-        return jsonify({'message': 'Trade record added successfully.'}), 200
+        flash(f"{data_type} record deleted successfully!", "success")
+        return redirect(url_for('data_management'))
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': f'Failed to add trade record: {str(e)}'}), 500
+        flash(f"Error deleting record: {e}", "danger")
+        return redirect(url_for('data_management'))
 
-@app.route('/admin/view-trades', methods=['GET'])
-def view_trades():
-    try:
-        trades = TradeRecord.query.join(Product, TradeRecord.product_id == Product.id).all()
-        return render_template('view_trades.html', trades=trades)
-    except Exception as e:
-        flash(f"Error fetching trades: {str(e)}", "danger")
-        return redirect(request.referrer)
 
-@app.route('/admin/settle-trade/<int:id>', methods=['POST'])
-def settle_trade(id):
+@app.route('/admin/export/<string:data_type>', methods=['GET'])
+def export_data(data_type):
+    """
+    Export data to a CSV file.
+    """
+    if data_type not in MODEL_CLASSES:
+        flash("Invalid data type for export.", "danger")
+        return redirect(url_for('data_management'))
+
+    model_class = MODEL_CLASSES[data_type]
+    records = model_class.query.all()
+    columns = [col.name for col in model_class.__table__.columns]
+
+    csv_file = StringIO()
+    csv_writer = csv.writer(csv_file)
+    csv_writer.writerow(columns)
+
+    for record in records:
+        csv_writer.writerow([getattr(record, col) for col in columns])
+
+    csv_file.seek(0)
+
+    return Response(
+        csv_file,
+        mimetype="text/csv",
+        headers={"Content-disposition": f"attachment; filename={data_type}.csv"},
+    )
+
+
+from datetime import datetime
+
+@app.route('/admin/import/<string:data_type>', methods=['POST'])
+def import_data(data_type):
+    """
+    Import data from a CSV file and handle date fields properly.
+    """
+    if data_type not in MODEL_CLASSES:
+        return jsonify({"success": False, "error": "Invalid data type."}), 400
+
+    model_class = MODEL_CLASSES[data_type]
+    file = request.files.get("file")
+
+    if not file:
+        return jsonify({"success": False, "error": "No file uploaded."}), 400
+
     try:
-        trade = TradeRecord.query.get(id)
-        if not trade:
-            return jsonify({'error': 'Trade record not found'}), 404
-        trade.settlement_status = 'settled'
+        csv_file = StringIO(file.stream.read().decode("utf-8"))
+        csv_reader = csv.DictReader(csv_file)
+
+        for row in csv_reader:
+            # Prepare the record data
+            record_data = {}
+            for key, value in row.items():
+                if not value:
+                    record_data[key] = None  # Handle empty values as None
+                    continue
+
+                # Check if the column is a date or datetime field
+                column_type = getattr(model_class, key).type
+                if isinstance(column_type, db.DateTime):
+                    record_data[key] = datetime.strptime(value, "%d-%m-%Y")  # Adjust format as per your CSV
+                elif isinstance(column_type, db.Date):
+                    record_data[key] = datetime.strptime(value, "%d-%m-%Y").date()
+                else:
+                    record_data[key] = value  # Non-date fields remain unchanged
+
+            # Create a new record
+            record = model_class(**record_data)
+            db.session.add(record)
+
         db.session.commit()
-        return jsonify({'message': 'Trade settled successfully.'}), 200
+        return jsonify({"success": True})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': f'Failed to settle trade: {str(e)}'}), 500
+        return jsonify({"success": False, "error": str(e)}), 500
 
+    
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0')

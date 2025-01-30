@@ -3,67 +3,154 @@
 {% block title %}Daily Sales Report{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
+<div class="container-fluid mt-3">
     <h2 class="text-center">New Pavan Restaurant & Bar</h2>
-    <p class="text-center">
-        Date: {{ today.strftime('%Y-%m-%d') }}<br>
-    </p>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <p class="mb-0">
+            <strong>Date:</strong> {{ today.strftime('%d-%m-%Y') if today else 'Today' }}
+        </p>
+        <div>
+            <label for="report-date" class="me-2">Select Date:</label>
+            <input type="date" id="report-date" class="form-control d-inline w-auto" 
+                   value="{{ today.strftime('%Y-%m-%d') }}" onchange="fetchReport()">
+        </div>
+    </div>
 
-    {{ report_data }}
-
-    {{ grand_total }}
-
-    <!-- {% for brand_type, brands in report_data.items() %}
-    <h3>{{ brand_type }}</h3>
-    <table class="table table-bordered table-striped">
-        <thead>
-            <tr>
-                <th>Brand Name</th>
-                {% for brand_name, brand_data in brands.items() %}
-                    {% for size in brand_data['sizes'].keys() %}
-                        <th>OB ({{ size }}ml)</th>
-                        <th>CB ({{ size }}ml)</th>
-                        <th>New Stock ({{ size }}ml)</th>
-                        <th>Sale ({{ size }}ml)</th>
-                        <th>Amount ({{ size }}ml)</th>
+    {% for brand_type, brands in report_data.items() %}
+    <h3 class="mt-3 text-uppercase" style="font-weight: bold;">{{ brand_type }}</h3>
+    {% set sizes_list = [] %}
+    {% for brand_data in brands.values() %}
+        {% for size in brand_data.sizes.keys() %}
+            {% if size not in sizes_list %}
+                {% set _ = sizes_list.append(size) %}
+            {% endif %}
+        {% endfor %}
+    {% endfor %}
+    {% set sizes_list = sizes_list | sort(reverse=True) %}
+    <div class="table-responsive">
+        <table class="table table-bordered table-sm">
+            <thead>
+                <tr>
+                    <th rowspan="2" class="align-middle">Brand Name</th>
+                    {% for col in ['OB', 'CB', 'New Stock', 'Sale', 'Amount'] %}
+                    <th class="text-center" colspan="{{ sizes_list | length }}">{{ col }}</th>
                     {% endfor %}
-                    <th>Total OB</th>
-                    <th>Total CB</th>
-                    <th>Total Sale</th>
-                    <th>Total Amount</th>
+                </tr>
+                <tr>
+                    {% for _ in range(5) %}
+                    {% for size in sizes_list %}
+                    <th class="text-center">{{ size }}</th>
+                    {% endfor %}
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for brand_name, brand_data in brands.items() %}
+                <tr>
+                    <td>{{ brand_name }}</td>
+                    {% for col in ['ob', 'cb', 'new_stock', 'sale', 'amount'] %}
+                    {% for size in sizes_list %}
+                    <td class="text-center">
+                        {{ brand_data.sizes[size][col] if size in brand_data.sizes else '' }}
+                    </td>
+                    {% endfor %}
+                    {% endfor %}
+                </tr>
                 {% endfor %}
-            </tr>
-        </thead>
-        <tbody>
-            {% for brand_name, brand_data in brands.items() %}
-            <tr>
-                <td>{{ brand_name }}</td>
-                {% for size, size_data in brand_data['sizes'].items() %}
-                <td>{{ size_data.ob }}</td>
-                <td>{{ size_data.cb }}</td>
-                <td>{{ size_data.new_stock }}</td>
-                <td>{{ size_data.sale }}</td>
-                <td>{{ size_data.amount }}</td>
+            </tbody>
+        </table>
+    </div>
+    {% endfor %}
+    
+    <h3 class="mt-3 no-print" style="font-weight: bold;">Brand Type Wise Profit</h3>
+    <div class="table-responsive no-print">
+        <table class="table table-bordered table-sm">
+            <thead>
+                <tr>
+                    <th>Brand Type</th>
+                    <th>Total Sale (₹)</th>
+                    <th>Total Profit (₹)</th>  <!-- ✅ Added Profit Column -->
+                </tr>
+            </thead>
+            <tbody>
+                {% for brand_type, total_sale in total_sales_by_type.items() %}
+                <tr>
+                    <td>{{ brand_type }}</td>
+                    <td>₹{{ total_sale }}</td>
+                    <td>₹{{ total_profit_by_type[brand_type] }}</td>  <!-- ✅ Display Profit -->
+                </tr>
                 {% endfor %}
-                <td>{{ brand_data['total'] is not none and brand_data['total'].ob or 0 }}</td>
-                <td>{{ brand_data['total'] is not none and brand_data['total'].cb or 0 }}</td>
-                <td>{{ brand_data['total'] is not none and brand_data['total'].sale or 0 }}</td>
-                <td>{{ brand_data['total'] is not none and brand_data['total'].amount or 0 }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-        <tfoot>
-            <tr>
-                <th colspan="{{ brands|length * 5 + 1 }}">Total for {{ brand_type }}</th>
-                <th>{{ brands | sum(attribute='total.ob') }}</th>
-                <th>{{ brands | sum(attribute='total.cb') }}</th>
-                <th>{{ brands | sum(attribute='total.sale') }}</th>
-                <th>{{ brands | sum(attribute='total.amount') }}</th>
-            </tr>
-        </tfoot>
-    </table>
-    {% endfor %}-->
+                <tr>
+                    <th>Grand Total</th>
+                    <th>₹{{ grand_total_sale }}</th>
+                    <th>₹{{ grand_total_profit }}</th>  <!-- ✅ Display Grand Total Profit -->
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+<div class="d-flex justify-content-end mb-2 no-print">
+    <button class="btn btn-primary" onclick="printReport()">Print</button>
+</div>
 
-    <!-- <h4 class="text-right">Grand Total: ₹{{ grand_total }}</h4>
-</div> -->
+<script>
+function fetchReport() {
+    const selectedDate = document.getElementById("report-date").value;
+    if (!selectedDate) return;
+
+    // Reload the page with the selected date
+    window.location.href = `/daily-report?date=${selectedDate}`;
+}
+
+function printReport() {
+    window.print();
+}
+</script>
+
+<style>
+    @media print {
+        /* Hide non-printable elements */
+        #report-date, label[for="report-date"], .btn, .no-print {
+            display: none !important;
+        }
+
+        /* Remove margins and paddings */
+        body, .container-fluid {
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Ensure full-width tables */
+        .table {
+            width: 100% !important;
+            margin: 0;
+            border-collapse: collapse; /* Ensures borders are single lines */
+        }
+
+        /* Reduce cell height and make borders darker */
+        th, td {
+            padding: 2px !important;
+            line-height: 1.01 !important;
+            border: 2px solid black !important; /* Darker border for table cells */
+        }
+
+        /* Bold headers with darker borders */
+        th {
+            font-weight: bold !important;
+            border: 2px solid black !important; /* Darker border for headers */
+        }
+    }
+
+    /* Additional styling for compact tables */
+    th, td {
+        padding: 4px !important;
+        line-height: 1.4;
+        border: 1px solid black; /* Default darker border for non-print */
+    }
+
+    .table {
+        border-collapse: collapse; /* Ensures cleaner table borders */
+    }
+</style>
+
 {% endblock %}

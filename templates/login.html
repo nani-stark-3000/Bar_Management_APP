@@ -3,16 +3,58 @@
 {% block content %}
 <div class="col-md-4 mx-auto">
     <h2 class="text-center">Login</h2>
-    <form method="POST">
+    <form method="POST" id="login-form">
         <div class="mb-3">
             <label>Username</label>
-            <input type="text" name="username" class="form-control" required>
+            <input type="text" name="username" class="form-control">
         </div>
         <div class="mb-3">
             <label>Password</label>
-            <input type="password" name="password" class="form-control" required>
+            <input type="password" name="password" class="form-control">
+        </div>
+        <div class="mb-3">
+            <label>Barcode</label>
+            <input type="text" name="barcode" id="barcode-input" class="form-control">
         </div>
         <button type="submit" class="btn btn-primary w-100">Login</button>
     </form>
 </div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const barcodeInput = document.getElementById("barcode-input");
+        const loginForm = document.getElementById("login-form");
+
+        // Focus on barcode input field when the page loads
+        barcodeInput.focus();
+
+        // Listen for input in the barcode field
+        barcodeInput.addEventListener("input", function () {
+            const barcode = this.value.trim();
+
+            // If a barcode is entered, send it to the server
+            if (barcode) {
+                fetch("/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ barcode }),
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.redirect_url) {
+                            // Redirect if login is successful
+                            window.location.href = data.redirect_url;
+                        } else if (data.error) {
+                            alert(data.error); // Show an error message
+                            this.value = ""; // Clear the barcode input
+                        }
+                    })
+                    .catch(err => {
+                        console.error("Error logging in:", err);
+                        this.value = ""; // Clear the barcode input
+                    });
+            }
+        });
+    });
+</script>
 {% endblock %}
