@@ -1169,6 +1169,14 @@ def daily_report():
     requested_date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
     requested_date = datetime.strptime(requested_date, '%Y-%m-%d').date()
 
+    # Get the first stock entry date
+    first_stock_date = db.session.query(func.min(Stock.date_added)).scalar()
+    if not first_stock_date:
+        return "No stock data found.", 404
+
+    first_stock_date = first_stock_date.date()  # Convert to date format
+    today = datetime.now().date()
+
     # Check if report exists for the requested date
     daily_report = DailyReport.query.filter_by(report_date=requested_date).first()
 
@@ -1180,6 +1188,9 @@ def daily_report():
         grand_total_sale = daily_report.grand_total_sale
         grand_total_profit = daily_report.grand_total_profit  # ✅ Fetch stored grand profit
     else:
+        if requested_date < today and requested_date >= first_stock_date:
+            ensure_daily_reports()
+
         # Generate report for today or if no stored report is found
         report_data, total_sales_by_type, total_profit_by_type, grand_total_sale, grand_total_profit = generate_report_data(requested_date)
 
@@ -1311,6 +1322,46 @@ def generate_report_data(requested_date):
         grand_total_profit += today_profit
 
     return report_data, total_sales_by_type, total_profit_by_type, grand_total_sale, grand_total_profit
+
+def ensure_daily_reports():
+    """
+    Ensure daily reports exist for all past dates starting from the first stock entry.
+    """
+    # Get the first stock entry date
+    first_stock_date = db.session.query(func.min(Stock.date_added)).scalar()
+    if not first_stock_date:
+        print("No stock data found. Skipping report generation.")
+        return
+    
+    first_stock_date = first_stock_date.date()  # Convert to date format
+    today = datetime.now().date()
+
+    # Iterate through each date from first stock date to today
+    current_date = first_stock_date
+    while current_date <= today:
+        # Check if a daily report exists for this date
+        existing_report = DailyReport.query.filter_by(report_date=current_date).first()
+
+        if not existing_report:
+            print(f"Generating missing report for {current_date}...")
+            report_data, total_sales_by_type, total_profit_by_type, grand_total_sale, grand_total_profit = generate_report_data(current_date)
+
+            # Save the generated report to the database
+            new_report = DailyReport(
+                report_date=current_date,
+                report_data=report_data,
+                total_sales_by_type=total_sales_by_type,
+                total_profit_by_type=total_profit_by_type,
+                grand_total_sale=grand_total_sale,
+                grand_total_profit=grand_total_profit
+            )
+            db.session.add(new_report)
+            db.session.commit()
+        else:
+            print(f"Report already exists for {current_date}. Skipping.")
+
+        current_date += timedelta(days=1)  # Move to next date
+
 
 @app.route('/admin/data-management', methods=['GET', 'POST'])
 def data_management():
@@ -1479,6 +1530,24 @@ def import_data(data_type):
         db.session.rollback()
         return jsonify({"success": False, "error": str(e)}), 500
 
-    
+@app.route('/admin/delete-all/<string:data_type>', methods=['POST'])
+def delete_all_data(data_type):
+    """
+    Delete all records from the selected data type.
+    """
+    if data_type not in MODEL_CLASSES:
+        return jsonify({"success": False, "error": "Invalid data type."}), 400
+
+    model_class = MODEL_CLASSES[data_type]
+
+    try:
+        num_deleted = db.session.query(model_class).delete()
+        db.session.commit()
+        return jsonify({"success": True, "message": f"Deleted {num_deleted} records."})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0')
