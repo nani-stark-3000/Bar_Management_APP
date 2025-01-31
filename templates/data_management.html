@@ -25,12 +25,13 @@
         </div>
     </form>
 
-    <!-- Export/Import Buttons -->
+    <!-- Export, Import & Delete All Buttons -->
     {% if data_type %}
     <div class="d-flex justify-content-between mb-3">
         <button class="btn btn-success" onclick="exportData('{{ data_type }}')">Export to CSV</button>
         <button class="btn btn-primary" onclick="document.getElementById('importInput').click()">Import CSV</button>
         <input type="file" id="importInput" accept=".csv" style="display: none;" onchange="importData('{{ data_type }}')">
+        <button class="btn btn-danger" onclick="deleteAllData('{{ data_type }}')">Delete All Data</button>
     </div>
     {% endif %}
 
@@ -54,11 +55,7 @@
                     <td>{{ record[column] }}</td>
                     {% endfor %}
                     <td>
-                        <button
-                            class="btn btn-warning btn-sm edit-btn"
-                            data-id="{{ record['id'] }}"
-                            data-type="{{ data_type }}"
-                        >Edit</button>
+                        <button class="btn btn-warning btn-sm edit-btn" data-id="{{ record['id'] }}" data-type="{{ data_type }}">Edit</button>
                         <form method="POST" action="{{ url_for('delete_record', data_type=data_type, record_id=record['id']) }}" class="d-inline">
                             <button type="submit" class="btn btn-danger btn-sm">Delete</button>
                         </form>
@@ -109,15 +106,30 @@
                 method: 'POST',
                 body: formData,
             })
-                .then((res) => res.json())
-                .then((data) => {
-                    if (data.success) {
-                        alert('Data imported successfully!');
-                        location.reload();
-                    } else {
-                        alert(data.error || 'Import failed.');
-                    }
-                });
+            .then((res) => res.json())
+            .then((data) => {
+                if (data.success) {
+                    alert('Data imported successfully!');
+                    location.reload();
+                } else {
+                    alert(data.error || 'Import failed.');
+                }
+            });
+        }
+    }
+
+    function deleteAllData(dataType) {
+        if (confirm(`Are you sure you want to delete all records from ${dataType}?`)) {
+            fetch(`/admin/delete-all/${dataType}`, { method: "POST" })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    alert('All records deleted successfully!');
+                    location.reload();
+                } else {
+                    alert(data.error || 'Delete failed.');
+                }
+            });
         }
     }
 
@@ -132,14 +144,14 @@
                     if (data.success) {
                         const editFields = document.getElementById('edit-fields');
                         editFields.innerHTML = '';
-                        Object.keys(data.record).forEach((key) => {
+                        for (const [key, value] of Object.entries(data.record)) {
                             editFields.innerHTML += `
                                 <div class="mb-3">
                                     <label class="form-label">${key}</label>
-                                    <input type="text" class="form-control" name="${key}" value="${data.record[key]}">
+                                    <input type="text" class="form-control" name="${key}" value="${value}">
                                 </div>
                             `;
-                        });
+                        }
 
                         const editForm = document.getElementById('editForm');
                         editForm.onsubmit = (event) => {
@@ -150,15 +162,15 @@
                                 body: JSON.stringify(Object.fromEntries(formData)),
                                 headers: { 'Content-Type': 'application/json' },
                             })
-                                .then((res) => res.json())
-                                .then((data) => {
-                                    if (data.success) {
-                                        alert('Record updated successfully!');
-                                        location.reload();
-                                    } else {
-                                        alert(data.error || 'Update failed.');
-                                    }
-                                });
+                            .then((res) => res.json())
+                            .then((data) => {
+                                if (data.success) {
+                                    alert('Record updated successfully!');
+                                    location.reload();
+                                } else {
+                                    alert(data.error || 'Update failed.');
+                                }
+                            });
                         };
 
                         new bootstrap.Modal(document.getElementById('editModal')).show();
