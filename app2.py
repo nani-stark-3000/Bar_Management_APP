@@ -787,6 +787,42 @@ def revoke_stock():
         return jsonify({'message': 'Stock addition revoked successfully'})
     return jsonify({'error': 'Unauthorized'}), 403
 
+@app.route('/admin/edit-stock', methods=['POST'])
+def edit_stock():
+    if 'role' in session and session['role'] in ['Admin', 'Supervisor']:
+        data = request.get_json()
+        history_id = data.get('history_id')
+        new_quantity = int(data.get('new_quantity'))
+
+        # Fetch stock history entry
+        history_entry = StockHistory.query.get(history_id)
+        if not history_entry:
+            return jsonify({'error': 'Stock history entry not found'}), 404
+
+        product_id = history_entry.product_id
+
+        # Fetch corresponding stock entry
+        stock_entry = Stock.query.filter_by(
+            product_id=product_id,
+            invoice_rate=history_entry.invoice_rate,
+            mrp=history_entry.mrp
+        ).first()
+
+        if not stock_entry:
+            return jsonify({'error': 'Matching stock entry not found'}), 404
+
+        # Adjust stock quantity based on difference
+        quantity_difference = new_quantity - history_entry.quantity
+        stock_entry.quantity += quantity_difference
+
+        # Update stock history entry
+        history_entry.quantity = new_quantity
+
+        db.session.commit()
+        return jsonify({'message': 'Stock entry updated successfully.'})
+
+    return jsonify({'error': 'Unauthorized'}), 403
+
 
 @app.template_filter('to12hr')
 def to12hr(value):
@@ -878,10 +914,52 @@ def sale_management():
         for product in products
     ]
 
-    sale_list = session.get('sale_list', {})
+    # Handle different possible sale list formats
+    sale_list = session.get('sale_list', [])
+    
+    # Normalize sale list to consistent format
+    normalized_sale_list = []
+    
+    if isinstance(sale_list, dict):
+        # Convert dictionary to list of values
+        sale_list = list(sale_list.values())
+    
+    # Ensure each item is a dictionary and has required keys
+    for item in sale_list:
+        if isinstance(item, dict):
+            # Existing dictionary item
+            try:
+                normalized_item = {
+                    "product_id": item.get("product_id") or item.get("id"),
+                    "brand_name": item.get("brand_name", "Unknown"),
+                    "brand_type": item.get("brand_type", ""),
+                    "brand_size": item.get("brand_size", ""),
+                    "selling_price": float(item.get("selling_price", 0)),
+                    "quantity": int(item.get("quantity", 1))
+                }
+                normalized_sale_list.append(normalized_item)
+            except (TypeError, ValueError):
+                continue
+        elif isinstance(item, list):
+            # Handle potential list format
+            try:
+                normalized_item = {
+                    "product_id": item[0] if len(item) > 0 else None,
+                    "brand_name": item[1] if len(item) > 1 else "Unknown",
+                    "selling_price": float(item[2]) if len(item) > 2 else 0,
+                    "quantity": int(item[3]) if len(item) > 3 else 1
+                }
+                normalized_sale_list.append(normalized_item)
+            except (TypeError, ValueError, IndexError):
+                continue
+
+    # Update session with normalized list
+    session['sale_list'] = normalized_sale_list
+
+    # Calculate grand total safely
     grand_total = sum(
-        details["selling_price"] * details["quantity"]
-        for details in sale_list.values()
+        item.get("selling_price", 0) * item.get("quantity", 0)
+        for item in normalized_sale_list
     )
 
     today = datetime.now()  # Get the current date
@@ -889,102 +967,136 @@ def sale_management():
     return render_template(
         "sale_management.html",
         products=serialized_products,
-        sale_list=sale_list,
+        sale_list=normalized_sale_list,
         grand_total=grand_total,
-        today=today  # Pass the current date to the template
+        today=today
     )
-
 
 @app.route('/sales/add-product', methods=['POST'])
 def add_product_to_sale():
     data = request.get_json()
     product_id = data.get("product_id")
-    quantity_to_add = data.get("quantity", 1)
+    quantity_to_add = int(data.get("quantity", 1))
 
-    if not isinstance(quantity_to_add, int) or quantity_to_add <= 0:
-        message = "Invalid quantity specified."
-        return jsonify({"error": message}), 400
+    if quantity_to_add <= 0:
+        return jsonify({"error": "Invalid quantity specified."}), 400
 
     if "sale_list" not in session:
-        session["sale_list"] = {}
+        session["sale_list"] = []
 
     sale_list = session["sale_list"]
 
-    # Fetch available stock for the product
+    # Fetch available stock
     stock_entries = Stock.query.filter_by(product_id=product_id).order_by(Stock.date_added).all()
     available_quantity = sum(stock.quantity for stock in stock_entries)
 
     if available_quantity < quantity_to_add:
-        message = "Not enough stock available."
-        return jsonify({"error": message}), 400
+        return jsonify({"error": "Not enough stock available."}), 400
 
-    sale_item_key = str(product_id)
+    # Check if the product is already in the list
+    for item in sale_list:
+        if item.get("product_id") == product_id:
+            item["quantity"] += quantity_to_add
+            session["sale_list"] = sale_list
+            return jsonify({"message": f"Added {quantity_to_add} more items.", "sale_list": sale_list})
 
-    # Admin Logic
-    if session.get('role') == 'Admin':
-        sale_list[sale_item_key] = {
-            "product_id": product_id,
-            "brand_name": stock_entries[0].product.brand_name,
-            "brand_type": stock_entries[0].product.brand_type,
-            "brand_size": stock_entries[0].product.brand_size,
-            "selling_price": stock_entries[0].product.selling_price,
-            "quantity": min(quantity_to_add, available_quantity),  # Enforce max stock limit
-        }
-    else:
-        # Regular User Logic
-        current_quantity = sale_list.get(sale_item_key, {}).get("quantity", 0)
-        if current_quantity + quantity_to_add > available_quantity:
-            message = "Not enough stock available for this quantity."
-            return jsonify({"error": message}), 400
-
-        if sale_item_key in sale_list:
-            sale_list[sale_item_key]["quantity"] += quantity_to_add
-        else:
-            sale_list[sale_item_key] = {
-                "product_id": product_id,
-                "brand_name": stock_entries[0].product.brand_name,
-                "brand_type": stock_entries[0].product.brand_type,
-                "brand_size": stock_entries[0].product.brand_size,
-                "selling_price": stock_entries[0].product.selling_price,
-                "quantity": quantity_to_add,
-            }
-
+    # If not in list, add new product
+    product = Product.query.get(product_id)
+    new_item = {
+        "product_id": product_id,
+        "brand_name": product.brand_name,
+        "brand_type": product.brand_type,
+        "brand_size": product.brand_size,
+        "selling_price": product.selling_price,
+        "quantity": quantity_to_add,
+    }
+    sale_list.append(new_item)
     session["sale_list"] = sale_list
-    message = f"Successfully added {quantity_to_add} items to the sale list."
-    return jsonify({"message": message, "sale_list": sale_list})
+    return jsonify({"message": f"Added {quantity_to_add} items to sale.", "sale_list": sale_list})
+
 
 @app.route('/sales/update-quantity', methods=['POST'])
 def update_quantity():
     data = request.get_json()
-    sale_item_key = data.get("sale_item_key")
-    new_quantity = data.get("quantity")
-    new_quantity = int(new_quantity)
+    product_id = data.get("product_id")
+    quantity_change = int(data.get("quantity_change"))
 
-    # Validate new_quantity is a positive integer
-    if not isinstance(new_quantity, int) or new_quantity <= 0:
-        return jsonify({"error": "Invalid quantity specified."}), 400
+    sale_list = session.get("sale_list", [])
 
-    # Get the current sale list from the session
-    sale_list = session.get("sale_list", {})
-    if sale_item_key not in sale_list:
-        return jsonify({"error": "Product not found in sale list."}), 404
+    for item in sale_list:
+        if item.get("product_id") == product_id:
+            # Fetch available stock
+            stock_entries = Stock.query.filter_by(product_id=product_id).order_by(Stock.date_added).all()
+            available_quantity = sum(stock.quantity for stock in stock_entries)
 
-    # Fetch product ID and validate stock availability
-    product_id = sale_list[sale_item_key]["product_id"]
-    stock_entries = Stock.query.filter_by(product_id=product_id).order_by(Stock.date_added).all()
-    available_quantity = sum(stock.quantity for stock in stock_entries)
+            # Calculate new quantity
+            new_quantity = item["quantity"] + quantity_change
 
-    # Ensure new_quantity does not exceed available stock
-    if new_quantity > available_quantity:
-        return jsonify({"error": "Not enough stock available to set this quantity."}), 400
+            if new_quantity > available_quantity:
+                return jsonify({"error": "Not enough stock available."}), 400
 
-    # Update the sale list
-    sale_list[sale_item_key]["quantity"] = new_quantity
-    session["sale_list"] = sale_list
+            # Remove item if quantity reaches zero
+            if new_quantity <= 0:
+                sale_list.remove(item)
+            else:
+                item["quantity"] = new_quantity
 
-    return jsonify({"message": "Quantity updated successfully.", "sale_list": sale_list})
+            session["sale_list"] = sale_list
+            return jsonify({"message": "Quantity updated successfully.", "sale_list": sale_list})
+
+    return jsonify({"error": "Product not found in sale list."}), 404
 
 
+@app.route('/sales/confirm-sale', methods=['POST'])
+def confirm_sale():
+    if "sale_list" not in session or not session["sale_list"]:
+        return jsonify({"error": "No sale list to confirm."}), 400
+
+    sale_list = session["sale_list"]
+    user_id = session.get("username")
+
+    data = request.get_json()
+    sale_date = data.get("sale_date")
+
+    from datetime import datetime
+    sale_date = datetime.strptime(sale_date, "%Y-%m-%d") if sale_date else datetime.now()
+
+    for item in sale_list:
+        product_id = item["product_id"]
+        quantity_to_deduct = item["quantity"]
+
+        stock_entries = Stock.query.filter_by(product_id=product_id).order_by(Stock.date_added).all()
+        remaining_quantity = quantity_to_deduct
+
+        for stock_entry in stock_entries:
+            if remaining_quantity <= 0:
+                break
+
+            deduct_quantity = min(remaining_quantity, stock_entry.quantity)
+            if deduct_quantity > 0:
+                sale = Sale(
+                    product_id=product_id,
+                    user_id=user_id,
+                    quantity=deduct_quantity,
+                    total_price=deduct_quantity * item["selling_price"],
+                    date_sold=sale_date,
+                    invoice_rate=stock_entry.invoice_rate,
+                    mrp=stock_entry.mrp,
+                    selling_price=item["selling_price"],
+                    profit=(item["selling_price"] - stock_entry.invoice_rate) * deduct_quantity,
+                )
+                db.session.add(sale)
+                stock_entry.quantity -= deduct_quantity
+                remaining_quantity -= deduct_quantity
+
+        if remaining_quantity > 0:
+            return jsonify({"error": "Stock mismatch detected. Sale cannot be processed."}), 400
+
+    db.session.commit()
+    session.pop("sale_list", None)
+    return jsonify({"message": "Sale confirmed successfully."})
+
+# Other routes remain the same as in the original code
 @app.route('/sales/remove-product', methods=['POST'])
 def remove_product_from_sale():
     data = request.get_json()
@@ -1004,64 +1116,6 @@ def remove_product_from_sale():
         return jsonify({"message": "Product removed successfully.", "sale_list": sale_list})
 
     return jsonify({"error": "Product not found in sale list."}), 404
-
-@app.route('/sales/confirm-sale', methods=['POST'])
-def confirm_sale():
-    if "sale_list" not in session:
-        return jsonify({"error": "No sale list to confirm."}), 400
-
-    sale_list = session["sale_list"]
-    user_id = session.get("username")  # Ensure `username` matches user logic
-
-    # Get the sale date from the request; default to today if not provided
-    data = request.get_json()
-    sale_date = data.get("sale_date")
-
-    USE_FIXED_DATE = False  # Set to False for dynamic date logic
-    if USE_FIXED_DATE:
-        sale_date = datetime.strptime("2025-01-25", "%Y-%m-%d")
-    else:
-        sale_date = datetime.strptime(sale_date, "%Y-%m-%d") if sale_date else datetime.now()
-
-    for sale_item_key, details in sale_list.items():
-        product_id = details["product_id"]
-        quantity_to_deduct = details["quantity"]
-
-        # Fetch stock entries for the product (FIFO)
-        stock_entries = Stock.query.filter_by(product_id=product_id).order_by(Stock.date_added).all()
-
-        remaining_quantity = quantity_to_deduct
-
-        for stock_entry in stock_entries:
-            if remaining_quantity <= 0:
-                break
-
-            deduct_quantity = min(remaining_quantity, stock_entry.quantity)
-            if deduct_quantity > 0:
-                sale = Sale(
-                    product_id=product_id,
-                    user_id=user_id,
-                    quantity=deduct_quantity,
-                    total_price=deduct_quantity * details["selling_price"],
-                    date_sold=sale_date,  # Use the selected or default date
-                    invoice_rate=stock_entry.invoice_rate,
-                    mrp=stock_entry.mrp,
-                    selling_price=details["selling_price"],
-                    profit=(details["selling_price"] - stock_entry.invoice_rate) * deduct_quantity,
-                )
-                db.session.add(sale)
-
-                stock_entry.quantity -= deduct_quantity
-                remaining_quantity -= deduct_quantity
-
-        if remaining_quantity > 0:
-            return jsonify({"error": "Stock mismatch detected. Sale cannot be processed."}), 400
-
-    db.session.commit()
-    session.pop("sale_list", None)
-
-    return jsonify({"message": "Sale confirmed successfully."})
-
 
 @app.route('/sales/reject-sale', methods=['POST'])
 def reject_sale():
@@ -1162,6 +1216,36 @@ def revoke_sale():
     db.session.commit()
 
     return jsonify({'message': 'Sale quantity updated successfully.'})
+
+@app.route('/sales/delete/<int:sale_id>', methods=['DELETE'])
+def delete_sale(sale_id):
+    if session.get('role') != 'Admin':
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    # Fetch the sale record
+    sale = Sale.query.get(sale_id)
+    if not sale:
+        return jsonify({'error': 'Sale record not found'}), 404
+
+    # Restore stock
+    stock_entries = Stock.query.filter_by(
+        product_id=sale.product_id,
+        invoice_rate=sale.invoice_rate,
+        mrp=sale.mrp
+    ).order_by(Stock.date_added).all()
+
+    remaining_quantity = sale.quantity
+    for stock in stock_entries:
+        stock.quantity += min(stock.quantity, remaining_quantity)
+        remaining_quantity = 0
+        if remaining_quantity <= 0:
+            break
+
+    # Delete the sale record
+    db.session.delete(sale)
+    db.session.commit()
+
+    return jsonify({'message': 'Sale record deleted successfully.'})
 
 
 @app.route('/daily-report', methods=['GET'])
