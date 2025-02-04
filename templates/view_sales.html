@@ -55,6 +55,7 @@
                 {% if session['role'] == 'Admin' %}
                 <td>
                     <button class="btn btn-primary btn-sm" onclick="updateSale({{ sale.id }})">Save</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteSale({{ sale.id }})">Delete</button>
                 </td>
                 {% endif %}
             </tr>
@@ -80,7 +81,10 @@
             const date = row.getAttribute("data-date");
 
             const matchesSearch = (!searchInput || name.includes(searchInput));
-            const matchesDate = (!startDate || !endDate || (date >= startDate && date <= endDate));
+            const matchesDate = (!startDate && !endDate) || 
+                                (startDate && !endDate && date >= startDate) ||
+                                (!startDate && endDate && date <= endDate) ||
+                                (startDate && endDate && date >= startDate && date <= endDate);
 
             row.style.display = matchesSearch && matchesDate ? "table-row" : "none";
         });
@@ -98,9 +102,29 @@
         .then(data => {
             if (data.message) {
                 alert(data.message);
-                location.reload(); // Refresh to reflect changes
+                location.reload();
             } else {
                 alert(data.error || 'Failed to update sale');
+            }
+        });
+    }
+
+    function deleteSale(saleId) {
+        if (!confirm("Are you sure you want to delete this sale record? This action cannot be undone.")) {
+            return;
+        }
+
+        fetch(`/sales/delete/${saleId}`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.message) {
+                alert(data.message);
+                location.reload();
+            } else {
+                alert(data.error || "Failed to delete sale record.");
             }
         });
     }

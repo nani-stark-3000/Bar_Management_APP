@@ -10,8 +10,8 @@
     <ul id="search-results" class="list-group mt-2" style="display: none;"></ul>
 </div>
 
-<!-- Date Selection for Admin -->
-{% if session['role'] == 'Admin' %}
+<!-- Date Selection for Admin and Supervisor -->
+{% if session['role'] in ['Admin', 'Supervisor'] %}
 <div class="mb-4">
     <label for="sale-date" class="form-label">Select Date:</label>
     <input type="date" id="sale-date" class="form-control w-auto" value="{{ today.strftime('%Y-%m-%d') }}">
@@ -23,11 +23,10 @@
     <table class="table table-bordered text-center" id="sale-items-table">
         <thead class="thead-light">
             <tr>
-                <th style="font-size: larger;">Item Name</th>
-                <th style="font-size: larger;">Selling Price (₹)</th>
-                <th style="font-size: larger;">Quantity</th>
-                <th style="font-size: larger;">Total (₹)</th>
-                <th style="font-size: larger;">Action</th>
+                <th>Item Name</th>
+                <th>Selling Price (₹)</th>
+                <th>Quantity</th>
+                <th>Total (₹)</th>
             </tr>
         </thead>
         <tbody>
@@ -48,77 +47,70 @@
 </div>
 
 <script>
-    const allProducts = {{ products | tojson | safe }};
+    const allProducts = JSON.parse('{{ products | tojson | safe }}');
     const barcodeInput = document.getElementById("barcode-input");
     const saleDateInput = document.getElementById("sale-date");
+    const userRole = "{{ session['role'] }}";  
 
-    // Ensure the barcode input is focused
     function focusBarcodeInput() {
         barcodeInput.focus();
     }
 
-    // Add product to the sale list by barcode input
     barcodeInput.addEventListener("input", function () {
         const barcode = this.value.trim();
         const product = allProducts.find(p => p.barcode === barcode);
         if (product) {
-            addProductToSale(product.id, 1);
-            this.value = ""; // Clear the input after adding product
+            requestQuantityAndAdd(product);
+            this.value = "";
         }
     });
 
-    document.addEventListener("DOMContentLoaded", function () {
-        // Focus the barcode input by default
-        focusBarcodeInput();
-
-        // Bind the Enter key to confirm sale
-        document.addEventListener("keydown", function (event) {
-            if (event.key === "Enter") {
-                const barcodeInput = document.getElementById("barcode-input");
-                if (document.activeElement === barcodeInput && barcodeInput.value.trim() !== "") {
-                    const barcode = barcodeInput.value.trim();
-                    const product = allProducts.find(p => p.barcode === barcode);
-                    if (product) {
-                        addProductToSale(product.id, 1);
-                    }
-                    barcodeInput.value = "";
-                    return; // Prevent the sale confirmation if Enter is pressed in barcode input
-                }
-
-                confirmSale(); // Confirm sale if Enter is pressed elsewhere
-                event.preventDefault();
-            }
-        });
-    });
-
-    // Search products by name or brand code
     function searchProduct() {
         const query = document.getElementById("search-input").value.toLowerCase();
         const searchResults = document.getElementById("search-results");
         searchResults.innerHTML = "";
 
-        const filteredProducts = allProducts.filter(
-            product =>
-                product.brand_name.toLowerCase().includes(query) ||
-                product.brand_code.toLowerCase().includes(query)
+        if (!query) {
+            searchResults.style.display = "none";
+            return;
+        }
+
+        const filteredProducts = allProducts.filter(product =>
+            product.brand_name.toLowerCase().includes(query) ||
+            product.brand_code.toLowerCase().includes(query)
         );
 
         if (filteredProducts.length > 0) {
             searchResults.style.display = "block";
-
             filteredProducts.forEach(product => {
                 const listItem = document.createElement("li");
-                listItem.className = "list-group-item";
+                listItem.className = "list-group-item list-group-item-action";
                 listItem.textContent = `${product.brand_name} (${product.brand_type} - ${product.brand_size}ml)`;
-                listItem.onclick = () => {
-                    addProductToSale(product.id, 1);
+                listItem.onclick = function () {
+                    requestQuantityAndAdd(product);
                     searchResults.style.display = "none";
+                    document.getElementById("search-input").value = ""; // Clear input
                 };
                 searchResults.appendChild(listItem);
             });
         } else {
             searchResults.style.display = "none";
         }
+    }
+
+    function requestQuantityAndAdd(product) {
+        let quantity = 1;
+
+        if (userRole === "Admin" || userRole === "Supervisor") {
+            quantity = prompt(`Enter quantity for ${product.brand_name} (${product.brand_size}ml):`, 1);
+            if (quantity === null || isNaN(quantity) || quantity <= 0) {
+                alert("Invalid quantity entered.");
+                return;
+            }
+            quantity = parseInt(quantity);
+        }
+
+        addProductToSale(product.id, quantity);
     }
 
     function addProductToSale(productId, quantity = 1) {
@@ -139,34 +131,20 @@
             .catch(err => console.error("Error adding product to sale:", err));
     }
 
-    function updateQuantity(productKey, newQuantity) {
+    function updateQuantity(productId, change) {
         fetch("/sales/update-quantity", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sale_item_key: productKey, quantity: newQuantity }),
+            body: JSON.stringify({ product_id: productId, quantity_change: change }),
         })
-            .then(res => res.json())
-            .then(data => {
-                if (data.message) {
-                    updateSaleList(data.sale_list);
-                } else {
-                    alert(data.error || "Failed to update quantity.");
-                }
-            });
-    }
-
-    function removeProduct(productKey) {
-        fetch("/sales/remove-product", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sale_item_key: productKey }),
-        })
-            .then(res => res.json())
-            .then(data => {
+        .then(res => res.json())
+        .then(data => {
+            if (data.message) {
                 updateSaleList(data.sale_list);
-                focusBarcodeInput();
-            })
-            .catch(err => console.error("Error removing product:", err));
+            } else {
+                alert(data.error || "Failed to update quantity.");
+            }
+        });
     }
 
     function updateSaleList(saleList) {
@@ -176,40 +154,53 @@
         let grandTotal = 0;
         tableBody.innerHTML = "";
 
-        for (const [key, item] of Object.entries(saleList)) {
+        saleList.forEach(item => {
+            if (item.quantity <= 0) return;  // ✅ Automatically removes items with zero quantity
+
             const total = item.selling_price * item.quantity;
             grandTotal += total;
 
             const row = `
-                <tr>
+                <tr data-product-id="${item.product_id}">
                     <td>${item.brand_name} ${item.brand_type} ${item.brand_size}ml</td>
                     <td>₹${item.selling_price.toFixed(2)}</td>
                     <td>
-                        {% if session['role'] == 'Admin' %}
-                        <input type="number" value="${item.quantity}" class="form-control quantity-input" onchange="updateQuantity('${key}', this.value)">
-                        {% else %}
-                        ${item.quantity}
-                        {% endif %}
+                        <div class="d-flex justify-content-center align-items-center">
+                            <button class="btn btn-sm btn-secondary me-2" onclick="updateQuantity(${item.product_id}, -1)">-</button>
+                            {% if session['role'] in ['Admin', 'Supervisor'] %}
+                            <input type="number" class="form-control quantity-input text-center" style="width: 60px;"
+                                value="${item.quantity}" onchange="updateQuantity(${item.product_id}, this.value - ${item.quantity})">
+                            {% else %}
+                            <span class="quantity-value mx-2">${item.quantity}</span>
+                            {% endif %}
+                            <button class="btn btn-sm btn-secondary" onclick="updateQuantity(${item.product_id}, 1)">+</button>
+                        </div>
                     </td>
                     <td>₹${total.toFixed(2)}</td>
-                    <td>
-                        <button class="btn btn-danger btn-sm" onclick="removeProduct('${key}')">Remove</button>
-                    </td>
                 </tr>
             `;
             tableBody.insertAdjacentHTML("beforeend", row);
-        }
+        });
 
         grandTotalElement.textContent = grandTotal.toFixed(2);
     }
 
     function confirmSale() {
-        const selectedDate = saleDateInput ? saleDateInput.value : null; // Get the selected date (if admin)
+        {% if session['role'] in ['Admin', 'Supervisor'] %}
+        const selectedDate = saleDateInput.value;
+        const today = new Date().toISOString().split('T')[0];
+
+        if (selectedDate !== today) {
+            if (!confirm(`You are creating a sale for ${selectedDate}. Are you sure?`)) {
+                return;
+            }
+        }
+        {% endif %}
 
         fetch("/sales/confirm-sale", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sale_date: selectedDate }),
+            body: JSON.stringify({ sale_date: saleDateInput ? saleDateInput.value : null }),
         })
             .then(res => res.json())
             .then(data => {
@@ -222,16 +213,23 @@
             .catch(err => console.error("Error confirming sale:", err));
     }
 
+    document.addEventListener("DOMContentLoaded", function () {
+        focusBarcodeInput();
+    });
+    
     function rejectSale() {
         fetch("/sales/reject-sale", { method: "POST" })
-            .then(() => {
-                document.querySelector("#sale-items-table tbody").innerHTML = "";
-                document.getElementById("grand-total").textContent = "0.00";
-                focusBarcodeInput();
+            .then(res => res.json())
+            .then(data => {
+                if (data.message) {
+                    document.querySelector("#sale-items-table tbody").innerHTML = "";
+                    document.getElementById("grand-total").textContent = "0.00";
+                    focusBarcodeInput();
+                }
             })
             .catch(err => console.error("Error rejecting sale:", err));
     }
-
-    document.addEventListener("DOMContentLoaded", focusBarcodeInput);
+    
 </script>
+
 {% endblock %}
