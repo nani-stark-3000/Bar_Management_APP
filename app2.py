@@ -1058,8 +1058,10 @@ def confirm_sale():
     data = request.get_json()
     sale_date = data.get("sale_date")
 
-    from datetime import datetime
     sale_date = datetime.strptime(sale_date, "%Y-%m-%d") if sale_date else datetime.now()
+    sale_date = sale_date.date()  # Convert to date only
+
+    affected_date = sale_date  # Keep track of the earliest affected date
 
     for item in sale_list:
         product_id = item["product_id"]
@@ -1094,6 +1096,10 @@ def confirm_sale():
 
     db.session.commit()
     session.pop("sale_list", None)
+
+    # ✅ Update reports from the affected sale date to today
+    update_reports_from_date(affected_date)
+
     return jsonify({"message": "Sale confirmed successfully."})
 
 # Other routes remain the same as in the original code
@@ -1443,6 +1449,50 @@ def ensure_daily_reports():
             db.session.commit()
         else:
             print(f"Report already exists for {current_date}. Skipping.")
+
+        current_date += timedelta(days=1)  # Move to next date
+
+def update_reports_from_date(start_date):
+    """
+    Update daily reports from the given start_date up to today by recalculating data.
+    This ensures past sales updates reflect correctly without deleting reports.
+    """
+    today = datetime.now().date()
+    
+    # Ensure start_date is not in the future
+    if start_date > today:
+        print("Start date is in the future. No updates required.")
+        return
+
+    current_date = start_date
+    while current_date <= today:
+        # Fetch the existing daily report
+        existing_report = DailyReport.query.filter_by(report_date=current_date).first()
+
+        # Recalculate report data
+        report_data, total_sales_by_type, total_profit_by_type, grand_total_sale, grand_total_profit = generate_report_data(current_date)
+
+        if existing_report:
+            # Update existing entry
+            existing_report.report_data = report_data
+            existing_report.total_sales_by_type = total_sales_by_type
+            existing_report.total_profit_by_type = total_profit_by_type
+            existing_report.grand_total_sale = grand_total_sale
+            existing_report.grand_total_profit = grand_total_profit
+        else:
+            # Create new entry if missing
+            new_report = DailyReport(
+                report_date=current_date,
+                report_data=report_data,
+                total_sales_by_type=total_sales_by_type,
+                total_profit_by_type=total_profit_by_type,
+                grand_total_sale=grand_total_sale,
+                grand_total_profit=grand_total_profit
+            )
+            db.session.add(new_report)
+
+        db.session.commit()  # Save updates to DB
+        print(f"Updated report for {current_date}")
 
         current_date += timedelta(days=1)  # Move to next date
 
