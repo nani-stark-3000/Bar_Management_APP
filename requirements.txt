@@ -4,3 +4,7 @@ SQLAlchemy==2.0.25
 Werkzeug==3.0.1
 pandas==2.2.0
 Pillow==10.2.0
+plotly==5.18.0
+dash==2.14.2
+numpy==1.26.3
+pyarrow==14.0.1

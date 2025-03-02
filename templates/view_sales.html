@@ -69,6 +69,12 @@
     <strong>Total Sales: ₹<span id="grand-total">{{ grand_total_sales }}</span></strong>
 </div>
 
+<link rel="stylesheet" href="{{ url_for('static', filename='css/fontawesome.min.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap.min.css') }}">
+
+<script src="{{ url_for('static', filename='js/jquery.3.3.1.js') }}"></script>
+<script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+
 <script>
     function applyFilters() {
         const searchInput = document.getElementById("search-input").value.toLowerCase();

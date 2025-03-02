@@ -1,19 +1,19 @@
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file, make_response, flash, Response
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func, desc, extract
-from werkzeug.utils import secure_filename
-import os
 from datetime import datetime, date, timedelta
+from sqlalchemy import func, extract, and_
+from werkzeug.utils import secure_filename
 import uuid 
 import pandas as pd
 from PIL import Image
 import csv
+import os
 from io import StringIO
 
 app = Flask(__name__)
 app.secret_key = 'New Pavan Restaurant And Bar'
 
-# Database Configuration
+
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///bar_management.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -23,7 +23,7 @@ app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'gif'}
 
 db = SQLAlchemy(app)
 
-# Models
+
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -38,10 +38,10 @@ class Product(db.Model):
     barcode = db.Column(db.String(100), unique=True, nullable=False)
     brand_type = db.Column(db.String(80), nullable=False)
     brand_size = db.Column(db.String(80), nullable=False)
-    image_path = db.Column(db.String(120), nullable=True)  # Image field
+    image_path = db.Column(db.String(120), nullable=True)
     date_added = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     added_by = db.Column(db.String(80), nullable=False)
-    selling_price = db.Column(db.Float, nullable=False, default=0.0)  # Added selling price field
+    selling_price = db.Column(db.Float, nullable=False, default=0.0)
 
 class Stock(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -57,12 +57,11 @@ class StockHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
     quantity = db.Column(db.Integer, nullable=False)
-    invoice_rate = db.Column(db.Float, nullable=False)  # Newly added
-    mrp = db.Column(db.Float, nullable=False)           # Newly added
+    invoice_rate = db.Column(db.Float, nullable=False)
+    mrp = db.Column(db.Float, nullable=False)
     added_by = db.Column(db.String(80), nullable=False)
     date_added = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     product = db.relationship('Product', backref=db.backref('stock_history', lazy=True))
-
 
 class Sale(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -71,21 +70,20 @@ class Sale(db.Model):
     quantity = db.Column(db.Integer, nullable=False)
     total_price = db.Column(db.Float, nullable=False)
     date_sold = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    invoice_rate = db.Column(db.Float, nullable=False)  # Store invoice rate
-    mrp = db.Column(db.Float, nullable=False)           # Store MRP
-    selling_price = db.Column(db.Float, nullable=False)  # Store selling price
-    profit = db.Column(db.Float, nullable=False)        # Store profit for the sale
+    invoice_rate = db.Column(db.Float, nullable=False)
+    mrp = db.Column(db.Float, nullable=False)
+    selling_price = db.Column(db.Float, nullable=False)
+    profit = db.Column(db.Float, nullable=False)
     product = db.relationship('Product', backref=db.backref('sales', lazy=True))
-
 
 class DailyReport(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     report_date = db.Column(db.Date, unique=True, nullable=False)
-    report_data = db.Column(db.JSON, nullable=False)  # JSON column for report data
-    total_sales_by_type = db.Column(db.JSON, nullable=False)  # JSON for sales by brand type
-    total_profit_by_type = db.Column(db.JSON, nullable=False)  # ✅ NEW COLUMN for profit by brand type
-    grand_total_sale = db.Column(db.Float, nullable=False)  # Grand total sales
-    grand_total_profit = db.Column(db.Float, nullable=False)  # ✅ NEW COLUMN for grand total profit
+    report_data = db.Column(db.JSON, nullable=False)
+    total_sales_by_type = db.Column(db.JSON, nullable=False)
+    total_profit_by_type = db.Column(db.JSON, nullable=False)
+    grand_total_sale = db.Column(db.Float, nullable=False)
+    grand_total_profit = db.Column(db.Float, nullable=False)
 
 
 # Dynamically fetch model classes
@@ -110,6 +108,207 @@ with app.app_context():
 def calculate_profit(selling_price, invoice_rate, quantity):
     return (selling_price - invoice_rate) * quantity
 
+def get_sales_kpis(start_date=None, end_date=None):
+    if isinstance(start_date, str):
+        start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+    elif not start_date:
+        start_date = datetime.now().date() - timedelta(days=30)
+
+    if isinstance(end_date, str):
+        end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+    elif not end_date:
+        end_date = datetime.now().date()
+
+    daily_totals = db.session.query(
+        func.coalesce(func.sum(DailyReport.grand_total_sale), 0).label('total_sales'),
+        func.coalesce(func.sum(DailyReport.grand_total_profit), 0).label('total_profit')
+    ).filter(
+        DailyReport.report_date.between(start_date, end_date)
+    ).first()
+
+    top_products = db.session.query(
+        Product.brand_name,
+        Product.brand_size,
+        func.sum(Sale.quantity).label('total_quantity'),
+        func.sum(Sale.total_price).label('total_revenue')
+    ).join(Sale).filter(
+        Sale.date_sold.between(start_date, end_date)
+    ).group_by(Product.brand_name, Product.brand_size).order_by(func.sum(Sale.quantity).desc()).limit(10).all()
+
+    formatted_top_products = [
+        {
+            'brand_name': f"{p.brand_name} - {p.brand_size}",
+            'total_quantity': p.total_quantity,
+            'total_revenue': float(p.total_revenue)
+        } for p in top_products
+    ]
+
+    return {
+        'total_sales': round(float(daily_totals.total_sales), 2),
+        'total_profit': round(float(daily_totals.total_profit), 2),
+        'top_products': formatted_top_products
+    }
+
+def generate_sales_trend(start_date=None, end_date=None):
+    if isinstance(start_date, str):
+        start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+    elif not start_date:
+        start_date = datetime.now().date() - timedelta(days=30)
+
+    if isinstance(end_date, str):
+        end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+    elif not end_date:
+        end_date = datetime.now().date()
+
+    daily_data = db.session.query(
+        DailyReport.report_date,
+        func.coalesce(DailyReport.grand_total_sale, 0),
+        func.coalesce(DailyReport.grand_total_profit, 0)
+    ).filter(
+        DailyReport.report_date.between(start_date, end_date)
+    ).order_by(DailyReport.report_date).all()
+
+    return {
+        'labels': [row.report_date.strftime('%Y-%m-%d') for row in daily_data],
+        'datasets': [
+            {
+                'label': 'Sales',
+                'data': [float(row[1]) for row in daily_data],
+                'borderColor': '#2ecc71',
+                'backgroundColor': 'rgba(46, 204, 113, 0.1)',
+                'borderWidth': 2,
+                'fill': True
+            },
+            {
+                'label': 'Profit',
+                'data': [float(row[2]) for row in daily_data],
+                'borderColor': '#3498db',
+                'backgroundColor': 'rgba(52, 152, 219, 0.1)',
+                'borderWidth': 2,
+                'fill': True
+            }
+        ]
+    }
+
+def generate_product_performance(start_date=None, end_date=None):
+    if isinstance(start_date, str):
+        start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+    elif not start_date:
+        start_date = datetime.now().date() - timedelta(days=30)
+
+    if isinstance(end_date, str):
+        end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+    elif not end_date:
+        end_date = datetime.now().date()
+
+    type_metrics = db.session.query(
+        Product.brand_type,
+        func.coalesce(func.sum(Sale.total_price), 0).label('revenue')
+    ).join(Sale).filter(
+        Sale.date_sold.between(start_date, end_date)
+    ).group_by(Product.brand_type).all()
+
+    return {
+        'labels': [t.brand_type for t in type_metrics],
+        'datasets': [{
+            'data': [float(t.revenue) for t in type_metrics],
+            'backgroundColor': ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0'],
+            'borderWidth': 1
+        }]
+    }
+
+def get_inventory_kpis():
+    inventory_values = db.session.query(
+        func.sum(Stock.quantity * Stock.invoice_rate).label('actual_stock_value'),
+        func.sum(Stock.quantity * Product.selling_price).label('after_sale_value')  # Join to get selling_price
+    ).join(Product).first()
+
+    actual_stock_value = inventory_values.actual_stock_value or 0
+    after_sale_value = inventory_values.after_sale_value or 0
+
+    low_stock = db.session.query(
+        Product.brand_name,
+        Product.brand_size,
+        Stock.quantity
+    ).join(Stock).filter(Stock.quantity < 10).all()
+
+    formatted_low_stock = [
+        {
+            'brand_name': f"{item.brand_name} - {item.brand_size}",
+            'quantity': item.quantity
+        } for item in low_stock
+    ]
+
+    return {
+        'total_inventory_value': round(float(actual_stock_value), 2),  # Actual stock value
+        'after_sale_value': round(float(after_sale_value), 2),         # Value after sale
+        'low_stock_items': formatted_low_stock
+    }
+
+def get_hourly_sales_pattern():
+    sales_by_hour = db.session.query(
+        extract('hour', Sale.date_sold).label('hour'),
+        func.sum(Sale.total_price).label('sales')
+    ).group_by(
+        extract('hour', Sale.date_sold)
+    ).all()
+
+    hours = [row.hour for row in sales_by_hour]
+    sales = [float(row.sales) for row in sales_by_hour]
+
+    return {
+        'labels': hours,
+        'datasets': [{
+            'label': 'Sales',
+            'data': sales,
+            'borderColor': '#2ecc71',
+            'backgroundColor': 'rgba(46, 204, 113, 0.1)',
+            'borderWidth': 2,
+            'fill': True
+        }]
+    }
+
+@app.route('/admin/export-report', methods=['GET'])
+def export_report():
+    if 'user_id' not in session or session['role'] != 'Admin':
+        return redirect(url_for('login'))
+    
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    
+    if not start_date or not end_date:
+        return "Please provide both start and end dates.", 400
+    
+    try:
+        start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+        end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+    except ValueError:
+        return "Invalid date format. Use YYYY-MM-DD.", 400
+    
+    # Query DailyReport for the date range
+    reports = DailyReport.query.filter(
+        DailyReport.report_date.between(start_date, end_date)
+    ).order_by(DailyReport.report_date).all()
+    
+    # Generate CSV
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['Date', 'Sales', 'Profit'])
+    
+    for report in reports:
+        writer.writerow([
+            report.report_date.strftime('%Y-%m-%d'),
+            round(report.grand_total_sale, 2),
+            round(report.grand_total_profit, 2)
+        ])
+    
+    output.seek(0)
+    
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=daily_report.csv"}
+    )
 
 # Routes
 @app.route('/')
@@ -148,7 +347,6 @@ def login():
     return render_template('login.html')
 
 
-
 def redirect_dashboard(role):
     if role == 'Admin':
         return redirect(url_for('admin_dashboard'))
@@ -156,105 +354,6 @@ def redirect_dashboard(role):
         return redirect(url_for('supervisor_dashboard'))
     elif role == 'Salesman':
         return redirect(url_for('salesman_dashboard'))
-
-
-def get_filtered_sales(filter_type, date_selected):
-    today = date.today()
-    date_selected = date_selected or today.strftime('%Y-%m-%d')
-    records = []
-    
-    if filter_type == 'daily':
-        date_obj = datetime.strptime(date_selected, '%Y-%m-%d').date()
-        records = db.session.query(
-            Sale.date_sold,
-            func.sum(Sale.total_price),
-            func.sum(Sale.profit)
-        ).filter(func.date(Sale.date_sold) == date_obj).group_by(Sale.date_sold).all()
-
-    elif filter_type == 'monthly':
-        year, month = map(int, date_selected.split('-'))
-        records = db.session.query(
-            extract('day', Sale.date_sold),
-            func.sum(Sale.total_price),
-            func.sum(Sale.profit)
-        ).filter(
-            extract('year', Sale.date_sold) == year,
-            extract('month', Sale.date_sold) == month
-        ).group_by(extract('day', Sale.date_sold)).all()
-    
-    elif filter_type == 'yearly':
-        year = int(date_selected)
-        records = db.session.query(
-            extract('month', Sale.date_sold),
-            func.sum(Sale.total_price),
-            func.sum(Sale.profit)
-        ).filter(extract('year', Sale.date_sold) == year).group_by(extract('month', Sale.date_sold)).all()
-    
-    else:
-        start_date = today - timedelta(days=7)
-        records = db.session.query(
-            Sale.date_sold,
-            func.sum(Sale.total_price),
-            func.sum(Sale.profit)
-        ).filter(Sale.date_sold >= start_date).group_by(Sale.date_sold).all()
-    
-    return records
-
-@app.route('/admin/dashboard/charts', methods=['GET'])
-def get_chart_data():
-    filter_type = request.args.get('filter', 'daily')
-    date_selected = request.args.get('date', '')
-    records = get_filtered_sales(filter_type, date_selected)
-    
-    return jsonify({
-        "labels": [str(record[0]) for record in records],
-        "datasets": [
-            {"label": "Sales", "data": [float(record[1]) for record in records]},
-            {"label": "Profit", "data": [float(record[2]) for record in records]}
-        ]
-    })
-
-@app.route('/dashboard/brand-sales', methods=['GET'])
-def brand_sales():
-    sales_data = (
-        db.session.query(Product.brand_type, func.sum(Sale.total_price).label("total_sales"))
-        .join(Sale, Product.id == Sale.product_id)
-        .group_by(Product.brand_type)
-        .all()
-    )
-    
-    total_sales = sum(item.total_sales for item in sales_data) or 1
-    sales_percentages = [(item.total_sales / total_sales) * 100 for item in sales_data]
-    
-    return jsonify({
-        "labels": [item.brand_type for item in sales_data],
-        "datasets": [{"label": "Sales %", "data": sales_percentages}]
-    })
-
-@app.route('/dashboard/product-sales', methods=['GET'])
-def product_sales():
-    sort = request.args.get("sort", "sales")
-    date_filter = request.args.get("date", None)
-    
-    query = db.session.query(
-        Product.brand_name,
-        Product.brand_size,
-        Product.selling_price,
-        func.avg(Sale.quantity).label("avg_sold")
-    ).join(Sale, Product.id == Sale.product_id)
-    
-    if date_filter:
-        query = query.filter(func.date(Sale.date_sold) == date_filter)
-    
-    query = query.group_by(Product.id)
-    query = query.order_by(desc("avg_sold" if sort == "sales" else Product.selling_price))
-    
-    sales_data = query.all()
-    
-    return jsonify({
-        "labels": [f"{p.brand_name} {p.brand_size}ml - ₹{p.selling_price}" for p in sales_data],
-        "datasets": [{"label": "Avg Sold", "data": [p.avg_sold for p in sales_data]}]
-    })
 
 
 @app.route('/admin/add-user', methods=['POST'])
@@ -304,12 +403,71 @@ def inject_user_details():
         }
     }
 
-# Admin Dashboard
-@app.route('/admin/dashboard')
+@app.route('/admin/dashboard', methods=['GET', 'POST'])
 def admin_dashboard():
-    if 'role' in session and session['role'] == 'Admin':
-        return render_template('admin_dashboard.html',session=session)
-    return redirect(url_for('login'))
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    
+    start_date = request.form.get('start_date') or request.args.get('start_date')
+    end_date = request.form.get('end_date') or request.args.get('end_date')
+    
+    if start_date:
+        start_date = datetime.strptime(start_date, '%Y-%m-%d')
+    if end_date:
+        end_date = datetime.strptime(end_date, '%Y-%m-%d')
+    
+    sales_kpis = get_sales_kpis(start_date, end_date)
+    inventory_kpis = get_inventory_kpis()
+    sales_trend = generate_sales_trend(start_date, end_date)
+    product_performance = generate_product_performance(start_date, end_date)
+    hourly_sales = get_hourly_sales_pattern()
+    
+    if not sales_trend['labels']:
+        sales_trend = {
+            'labels': ['No Data'],
+            'datasets': [
+                {'label': 'Sales', 'data': [0], 'borderColor': '#2ecc71', 'backgroundColor': 'rgba(46, 204, 113, 0.1)', 'borderWidth': 2, 'fill': True},
+                {'label': 'Profit', 'data': [0], 'borderColor': '#3498db', 'backgroundColor': 'rgba(52, 152, 219, 0.1)', 'borderWidth': 2, 'fill': True}
+            ]
+        }
+    if not product_performance['labels']:
+        product_performance = {
+            'labels': ['No Data'],
+            'datasets': [{'data': [1], 'backgroundColor': ['#FF6384'], 'borderWidth': 1}]
+        }
+    
+    return render_template('admin_dashboard.html',
+                         sales_kpis=sales_kpis,
+                         inventory_kpis=inventory_kpis,
+                         sales_trend=sales_trend,
+                         product_performance=product_performance,
+                         hourly_sales=hourly_sales,
+                         start_date=start_date.strftime('%Y-%m-%d') if start_date else '',
+                         end_date=end_date.strftime('%Y-%m-%d') if end_date else '')
+
+@app.route('/admin/get_chart_data')
+def get_chart_data():
+    if 'user_id' not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    # Get date range from request parameters
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+
+    if start_date:
+        start_date = datetime.strptime(start_date, '%Y-%m-%d')
+    if end_date:
+        end_date = datetime.strptime(end_date, '%Y-%m-%d')
+
+    # Fetch analytics data
+    sales_trend = generate_sales_trend(start_date, end_date)
+    product_performance = generate_product_performance(start_date, end_date)
+
+    return jsonify({
+        "sales_trend": sales_trend,
+        "product_performance": product_performance
+    })
+
 
 @app.route('/admin/user-management')
 def user_management():
@@ -1097,7 +1255,7 @@ def confirm_sale():
     db.session.commit()
     session.pop("sale_list", None)
 
-    # ✅ Update reports from the affected sale date to today
+    # Update reports from the affected sale date to today
     update_reports_from_date(affected_date)
 
     return jsonify({"message": "Sale confirmed successfully."})
@@ -1218,6 +1376,7 @@ def revoke_sale():
     sale.quantity = new_quantity
     sale.total_price = new_quantity * sale.selling_price
     sale.profit = sale.total_price - (new_quantity * sale.invoice_rate)
+    update_reports_from_date(sale.date_sold.date())  # Add this line
 
     db.session.commit()
 
@@ -1250,6 +1409,7 @@ def delete_sale(sale_id):
     # Delete the sale record
     db.session.delete(sale)
     db.session.commit()
+    update_reports_from_date(sale.date_sold.date())
 
     return jsonify({'message': 'Sale record deleted successfully.'})
 
@@ -1274,9 +1434,9 @@ def daily_report():
         # Use stored report for past dates
         report_data = daily_report.report_data
         total_sales_by_type = daily_report.total_sales_by_type
-        total_profit_by_type = daily_report.total_profit_by_type  # ✅ Fetch stored profit data
+        total_profit_by_type = daily_report.total_profit_by_type  # Fetch stored profit data
         grand_total_sale = daily_report.grand_total_sale
-        grand_total_profit = daily_report.grand_total_profit  # ✅ Fetch stored grand profit
+        grand_total_profit = daily_report.grand_total_profit  # Fetch stored grand profit
     else:
         if requested_date < today and requested_date >= first_stock_date:
             ensure_daily_reports()
@@ -1290,18 +1450,18 @@ def daily_report():
                 # Update existing entry
                 daily_report.report_data = report_data
                 daily_report.total_sales_by_type = total_sales_by_type
-                daily_report.total_profit_by_type = total_profit_by_type  # ✅ Store profit data
+                daily_report.total_profit_by_type = total_profit_by_type  # Store profit data
                 daily_report.grand_total_sale = grand_total_sale
-                daily_report.grand_total_profit = grand_total_profit  # ✅ Store grand total profit
+                daily_report.grand_total_profit = grand_total_profit  # Store grand total profit
             else:
                 # Create a new entry
                 new_report = DailyReport(
                     report_date=requested_date,
                     report_data=report_data,
                     total_sales_by_type=total_sales_by_type,
-                    total_profit_by_type=total_profit_by_type,  # ✅ Store profit data
+                    total_profit_by_type=total_profit_by_type,  # Store profit data
                     grand_total_sale=grand_total_sale,
-                    grand_total_profit=grand_total_profit  # ✅ Store grand total profit
+                    grand_total_profit=grand_total_profit  # Store grand total profit
                 )
                 db.session.add(new_report)
             db.session.commit()
@@ -1311,9 +1471,9 @@ def daily_report():
         today=requested_date,
         report_data=report_data,
         total_sales_by_type=total_sales_by_type,
-        total_profit_by_type=total_profit_by_type,  # ✅ Pass profit data to template
+        total_profit_by_type=total_profit_by_type,  # Pass profit data to template
         grand_total_sale=grand_total_sale,
-        grand_total_profit=grand_total_profit  # ✅ Pass grand total profit
+        grand_total_profit=grand_total_profit  # Pass grand total profit
     )
 
 

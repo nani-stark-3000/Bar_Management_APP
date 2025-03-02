@@ -93,6 +93,12 @@
     <button class="btn btn-primary" onclick="printReport()">Print</button>
 </div>
 
+<link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap.min.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/fontawesome.min.css') }}">
+
+<script src="{{ url_for('static', filename='js/jquery.3.3.1.js') }}"></script>
+<script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+
 <script>
 function fetchReport() {
     const selectedDate = document.getElementById("report-date").value;
