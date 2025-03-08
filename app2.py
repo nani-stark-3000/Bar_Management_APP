@@ -876,6 +876,105 @@ def export_stock():
         )
     return jsonify({'message': 'Unauthorized'}), 403
 
+@app.route('/admin/bulk-add-stock', methods=['GET', 'POST'])
+def bulk_add_stock():
+    if 'role' not in session or session['role'] not in ['Admin', 'Supervisor']:
+        return jsonify({'message': 'Unauthorized'}), 403
+
+    if request.method == 'POST':
+        data = request.get_json()
+        stock_date = data.get('stock_date')
+        stock_items = data.get('stock_items')
+
+        if not stock_date or not stock_items:
+            return jsonify({'error': 'Missing required data'}), 400
+
+        try:
+            stock_date = datetime.strptime(stock_date, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'error': 'Invalid date format'}), 400
+
+        # Use a transaction to ensure atomicity
+        with db.session.begin():
+            for item in stock_items:
+                product_id = item['product_id']
+                quantity = int(item['quantity'])
+                invoice_rate = float(item['invoice_rate'])
+                mrp = float(item['mrp'])
+                added_by = session['username']
+
+                # Check for existing stock with matching invoice_rate and mrp
+                existing_stock = Stock.query.filter_by(
+                    product_id=product_id,
+                    invoice_rate=invoice_rate,
+                    mrp=mrp
+                ).first()
+
+                if existing_stock:
+                    existing_stock.quantity += quantity
+                    existing_stock.date_added = stock_date
+                else:
+                    new_stock = Stock(
+                        product_id=product_id,
+                        quantity=quantity,
+                        invoice_rate=invoice_rate,
+                        mrp=mrp,
+                        added_by=added_by,
+                        date_added=stock_date
+                    )
+                    db.session.add(new_stock)
+
+                # Record in StockHistory
+                stock_history_entry = StockHistory(
+                    product_id=product_id,
+                    quantity=quantity,
+                    invoice_rate=invoice_rate,
+                    mrp=mrp,
+                    added_by=added_by,
+                    date_added=stock_date
+                )
+                db.session.add(stock_history_entry)
+
+            # Commit the transaction
+            db.session.commit()
+
+        # Update reports from the stock date
+        update_reports_from_date(stock_date)
+        return jsonify({'message': 'Stock added successfully'})
+
+    # GET request: Render the bulk stock addition page
+    # Fetch products with their most recent invoice_rate and mrp
+    products_with_stock = db.session.query(
+        Product.id,
+        Product.brand_name,
+        Product.brand_type,
+        Product.brand_size,
+        Product.brand_code,
+        Product.barcode,
+        Product.selling_price,
+        Product.image_path,
+        db.func.max(Stock.invoice_rate).label('recent_invoice_rate'),
+        db.func.max(Stock.mrp).label('recent_mrp')
+    ).outerjoin(Stock, Product.id == Stock.product_id).group_by(Product.id).all()
+
+    # Serialize products into a list of dictionaries
+    serialized_products = [
+        {
+            'id': product.id,
+            'brand_name': product.brand_name,
+            'brand_type': product.brand_type,
+            'brand_size': product.brand_size,
+            'brand_code': product.brand_code,
+            'barcode': product.barcode,
+            'selling_price': product.selling_price,
+            'image_path': product.image_path or '',
+            'invoice_rate': float(product.recent_invoice_rate) if product.recent_invoice_rate is not None else 0.0,
+            'mrp': float(product.recent_mrp) if product.recent_mrp is not None else 0.0
+        }
+        for product in products_with_stock
+    ]
+    return render_template('bulk_add_stock.html', products=serialized_products, today=datetime.now())
+
 @app.route('/admin/stock-history', methods=['GET'])
 def stock_history():
     if 'role' in session and session['role'] in ['Admin', 'Supervisor']:
@@ -1476,98 +1575,94 @@ def daily_report():
         grand_total_profit=grand_total_profit  # Pass grand total profit
     )
 
+def get_ob(product_id, report_date):
+    """Calculate Opening Balance for a product on a specific date."""
+    # Stock added before the report date
+    stock_added_before = db.session.query(func.sum(StockHistory.quantity)).filter(
+        StockHistory.product_id == product_id,
+        func.date(StockHistory.date_added) < report_date
+    ).scalar() or 0
+
+    # Sales before the report date
+    sales_before = db.session.query(func.sum(Sale.quantity)).filter(
+        Sale.product_id == product_id,
+        func.date(Sale.date_sold) < report_date
+    ).scalar() or 0
+
+    ob = stock_added_before - sales_before
+    return ob if ob > 0 else 0  # Prevent negative stock
 
 def generate_report_data(requested_date):
     report_data = {}
     total_sales_by_type = {}
-    total_profit_by_type = {}  # Store brand type-wise profit
+    total_profit_by_type = {}
     grand_total_sale = 0
-    grand_total_profit = 0  # Store total profit across all products
+    grand_total_profit = 0
 
     products = Product.query.all()
     for product in products:
+        # Initialize report structure
         if product.brand_type not in report_data:
             report_data[product.brand_type] = {}
-
         if product.brand_name not in report_data[product.brand_type]:
             report_data[product.brand_type][product.brand_name] = {
                 "sizes": {},
                 "total": {"ob": 0, "cb": 0, "sale": 0, "amount": 0, "new_stock": 0, "profit": 0},
             }
 
-        # Fetch current stock for this product
-        current_stock = (
-            db.session.query(func.sum(Stock.quantity))
-            .filter(Stock.product_id == product.id)
-            .scalar()
-            or 0
-        )
+        # Calculate Opening Balance (OB)
+        ob = get_ob(product.id, requested_date)
 
-        # Fetch today's sales
-        today_sales = (
-            db.session.query(func.sum(Sale.quantity))
-            .filter(
-                Sale.product_id == product.id,
-                func.date(Sale.date_sold) == requested_date
-            )
-            .scalar()
-            or 0
-        )
+        # Today’s transactions
+        today_sales = db.session.query(func.sum(Sale.quantity)).filter(
+            Sale.product_id == product.id,
+            func.date(Sale.date_sold) == requested_date
+        ).scalar() or 0
 
-        # Fetch today's stock additions
-        today_stock_added = (
-            db.session.query(func.sum(StockHistory.quantity))
-            .filter(
-                StockHistory.product_id == product.id,
-                func.date(StockHistory.date_added) == requested_date
-            )
-            .scalar()
-            or 0
-        )
+        today_amount = db.session.query(func.sum(Sale.total_price)).filter(
+            Sale.product_id == product.id,
+            func.date(Sale.date_sold) == requested_date
+        ).scalar() or 0
 
-        # Fetch today's profit
-        today_profit = (
-            db.session.query(func.sum(Sale.profit))
-            .filter(
-                Sale.product_id == product.id,
-                func.date(Sale.date_sold) == requested_date
-            )
-            .scalar()
-            or 0
-        )
+        today_stock_added = db.session.query(func.sum(StockHistory.quantity)).filter(
+            StockHistory.product_id == product.id,
+            func.date(StockHistory.date_added) == requested_date
+        ).scalar() or 0
 
-        # Calculate OB and CB
-        ob = current_stock + today_sales - today_stock_added
-        cb = current_stock
+        today_profit = db.session.query(func.sum(Sale.profit)).filter(
+            Sale.product_id == product.id,
+            func.date(Sale.date_sold) == requested_date
+        ).scalar() or 0
 
-        # Calculate sale and amount
+        # Calculate Closing Balance (CB)
+        cb = ob + today_stock_added - today_sales
+
+        # Sale and amount
         sale = today_sales
-        amount = sale * product.selling_price
+        amount = today_amount  # Use sum of total_price from sale records
 
-        # Update brand data
+        # Populate report data
         report_data[product.brand_type][product.brand_name]["sizes"][product.brand_size] = {
             "ob": ob,
             "cb": cb,
             "sale": sale,
             "amount": amount,
             "new_stock": today_stock_added,
-            "profit": today_profit,  # Include profit per product size
+            "profit": today_profit,
         }
 
-        # Update totals
+        # Update totals for brand name
         totals = report_data[product.brand_type][product.brand_name]["total"]
         totals["ob"] += ob
         totals["cb"] += cb
         totals["sale"] += sale
         totals["amount"] += amount
         totals["new_stock"] += today_stock_added
-        totals["profit"] += today_profit  # Include profit in total
+        totals["profit"] += today_profit
 
-        # Update brand type-wise profit
+        # Update aggregates
         total_sales_by_type[product.brand_type] = total_sales_by_type.get(product.brand_type, 0) + amount
         total_profit_by_type[product.brand_type] = total_profit_by_type.get(product.brand_type, 0) + today_profit
-
-        # Update grand totals
         grand_total_sale += amount
         grand_total_profit += today_profit
 
