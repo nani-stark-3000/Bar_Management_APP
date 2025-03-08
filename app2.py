@@ -1032,6 +1032,7 @@ def revoke_stock():
 
         if stock_entry:
             stock_entry.quantity -= history_entry.quantity
+            stock_date = stock_entry.date_added.date()
             if stock_entry.quantity <= 0:
                 db.session.delete(stock_entry)  # Remove stock entry if quantity is zero or less
         else:
@@ -1040,7 +1041,7 @@ def revoke_stock():
         # Delete the history entry
         db.session.delete(history_entry)
         db.session.commit()
-
+        update_reports_from_date(stock_date)
         return jsonify({'message': 'Stock addition revoked successfully'})
     return jsonify({'error': 'Unauthorized'}), 403
 
@@ -1071,11 +1072,12 @@ def edit_stock():
         # Adjust stock quantity based on difference
         quantity_difference = new_quantity - history_entry.quantity
         stock_entry.quantity += quantity_difference
-
+        stock_date = stock_entry.date_added.date()
         # Update stock history entry
         history_entry.quantity = new_quantity
 
         db.session.commit()
+        update_reports_from_date(stock_date)
         return jsonify({'message': 'Stock entry updated successfully.'})
 
     return jsonify({'error': 'Unauthorized'}), 403
