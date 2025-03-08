@@ -1,0 +1,186 @@
+{% extends 'base.html' %}
+{% block title %}Bulk Add Stock{% endblock %}
+{% block content %}
+<h2 class="text-center mb-4">Bulk Add Stock</h2>
+
+<!-- Date Selection -->
+<div class="mb-4">
+    <label for="stock-date" class="form-label">Select Date:</label>
+    <input type="date" id="stock-date" class="form-control w-auto" value="{{ today.strftime('%Y-%m-%d') }}">
+</div>
+
+<!-- Search and Add Product Section -->
+<div class="mb-4">
+    <input type="text" id="search-input" class="form-control" placeholder="Search by Name or Brand Code" oninput="searchProduct()">
+    <ul id="search-results" class="list-group mt-2" style="display: none;"></ul>
+</div>
+
+<!-- Stock Items Table -->
+<div class="table-responsive">
+    <table class="table table-bordered text-center" id="stock-items-table">
+        <thead class="thead-light">
+            <tr>
+                <th>Item Name</th>
+                <th>Selling Price (₹)</th>
+                <th>Invoice Rate (₹)</th>
+                <th>MRP (₹)</th>
+                <th>Quantity</th>
+                <th>Total Invoice (₹)</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Stock items will be dynamically added here -->
+        </tbody>
+    </table>
+</div>
+
+<!-- Grand Total Invoice -->
+<div class="text-end mt-3">
+    <strong style="font-size: larger;">Grand Total Invoice: ₹<span id="grand-total-invoice">0.00</span></strong>
+</div>
+
+<!-- Confirm Button -->
+<div class="mt-3 text-center">
+    <button class="btn btn-success btn-lg" onclick="confirmStock()">Confirm Stock Addition</button>
+</div>
+
+<script>
+    const allProducts = JSON.parse('{{ products | tojson | safe }}');
+    let stockList = [];
+
+    function searchProduct() {
+        const query = document.getElementById("search-input").value.toLowerCase();
+        const searchResults = document.getElementById("search-results");
+        searchResults.innerHTML = "";
+
+        if (!query) {
+            searchResults.style.display = "none";
+            return;
+        }
+
+        const filteredProducts = allProducts.filter(product =>
+            product.brand_name.toLowerCase().includes(query) ||
+            product.brand_code.toLowerCase().includes(query)
+        );
+
+        if (filteredProducts.length > 0) {
+            searchResults.style.display = "block";
+            filteredProducts.forEach(product => {
+                const listItem = document.createElement("li");
+                listItem.className = "list-group-item list-group-item-action";
+                listItem.textContent = `${product.brand_name} (${product.brand_type} - ${product.brand_size}ml)`;
+                listItem.onclick = function () {
+                    addProductToStock(product);
+                    searchResults.style.display = "none";
+                    document.getElementById("search-input").value = "";
+                };
+                searchResults.appendChild(listItem);
+            });
+        } else {
+            searchResults.style.display = "none";
+        }
+    }
+
+    function addProductToStock(product) {
+        if (stockList.find(item => item.product_id === product.id)) {
+            alert("Product already added.");
+            return;
+        }
+
+        // Use existing invoice_rate and mrp from the database as defaults
+        const stockItem = {
+            product_id: product.id,
+            brand_name: product.brand_name,
+            brand_type: product.brand_type,
+            brand_size: product.brand_size,
+            selling_price: product.selling_price,
+            invoice_rate: product.invoice_rate, // Use existing value from Stock
+            mrp: product.mrp,                  // Use existing value from Stock
+            quantity: 0                        // Start with 0, let user input
+        };
+        stockList.push(stockItem);
+        updateStockTable();
+    }
+
+    function updateStockTable() {
+        const tableBody = document.querySelector("#stock-items-table tbody");
+        tableBody.innerHTML = "";
+        let grandTotalInvoice = 0;
+
+        stockList.forEach((item, index) => {
+            const totalInvoice = item.invoice_rate * item.quantity;
+            grandTotalInvoice += totalInvoice;
+
+            const row = `
+                <tr data-index="${index}">
+                    <td>${item.brand_name} ${item.brand_type} ${item.brand_size}ml</td>
+                    <td>₹${item.selling_price.toFixed(2)}</td>
+                    <td><input type="number" class="form-control" step="0.01" value="${item.invoice_rate}" onchange="updateStockItem(${index}, 'invoice_rate', this.value)"></td>
+                    <td><input type="number" class="form-control" step="0.01" value="${item.mrp}" onchange="updateStockItem(${index}, 'mrp', this.value)"></td>
+                    <td><input type="number" class="form-control" value="${item.quantity}" onchange="updateStockItem(${index}, 'quantity', this.value)"></td>
+                    <td>₹${totalInvoice.toFixed(2)}</td>
+                    <td><button class="btn btn-danger btn-sm" onclick="removeStockItem(${index})">Remove</button></td>
+                </tr>
+            `;
+            tableBody.insertAdjacentHTML("beforeend", row);
+        });
+
+        document.getElementById("grand-total-invoice").textContent = grandTotalInvoice.toFixed(2);
+    }
+
+    function updateStockItem(index, field, value) {
+        stockList[index][field] = parseFloat(value) || 0;
+        updateStockTable();
+    }
+
+    function removeStockItem(index) {
+        stockList.splice(index, 1);
+        updateStockTable();
+    }
+
+    function confirmStock() {
+        const stockDate = document.getElementById("stock-date").value;
+        if (!stockDate) {
+            alert("Please select a date.");
+            return;
+        }
+
+        if (stockList.length === 0) {
+            alert("No stock items to add.");
+            return;
+        }
+
+        for (const item of stockList) {
+            if (item.quantity <= 0 || item.invoice_rate <= 0 || item.mrp <= 0) {
+                alert("Please enter valid values for quantity, invoice rate, and MRP.");
+                return;
+            }
+        }
+
+        showLoading();
+
+        fetch("/admin/bulk-add-stock", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ stock_date: stockDate, stock_items: stockList }),
+        })
+            .then(res => res.json())
+            .then(data => {
+                hideLoading();
+                if (data.message) {
+                    alert("Stock added successfully.");
+                    stockList = [];
+                    updateStockTable();
+                } else {
+                    alert(data.error || "Failed to add stock.");
+                }
+            })
+            .catch(err => {
+                hideLoading();
+                console.error("Error adding stock:", err);
+                alert("An error occurred while adding stock.");
+            });
+    }
+</script>
+{% endblock %}

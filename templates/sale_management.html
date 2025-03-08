@@ -89,7 +89,7 @@
                 listItem.onclick = function () {
                     requestQuantityAndAdd(product);
                     searchResults.style.display = "none";
-                    document.getElementById("search-input").value = ""; // Clear input
+                    document.getElementById("search-input").value = "";
                 };
                 searchResults.appendChild(listItem);
             });
@@ -114,6 +114,7 @@
     }
 
     function addProductToSale(productId, quantity = 1) {
+        showLoading(); // Show loading before request
         fetch("/sales/add-product", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -121,6 +122,7 @@
         })
             .then(res => res.json())
             .then(data => {
+                hideLoading(); // Hide loading after response
                 if (data.error) {
                     alert(data.error);
                 } else {
@@ -128,10 +130,14 @@
                     focusBarcodeInput();
                 }
             })
-            .catch(err => console.error("Error adding product to sale:", err));
+            .catch(err => {
+                hideLoading(); // Hide loading on error
+                console.error("Error adding product to sale:", err);
+            });
     }
 
     function updateQuantity(productId, change) {
+        showLoading(); // Show loading before request
         fetch("/sales/update-quantity", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -139,11 +145,16 @@
         })
         .then(res => res.json())
         .then(data => {
+            hideLoading(); // Hide loading after response
             if (data.message) {
                 updateSaleList(data.sale_list);
             } else {
                 alert(data.error || "Failed to update quantity.");
             }
+        })
+        .catch(err => {
+            hideLoading(); // Hide loading on error
+            console.error("Error updating quantity:", err);
         });
     }
 
@@ -155,7 +166,7 @@
         tableBody.innerHTML = "";
 
         saleList.forEach(item => {
-            if (item.quantity <= 0) return;  // Automatically removes items with zero quantity
+            if (item.quantity <= 0) return;
 
             const total = item.selling_price * item.quantity;
             grandTotal += total;
@@ -197,6 +208,7 @@
         }
         {% endif %}
 
+        showLoading(); // Show loading before request
         fetch("/sales/confirm-sale", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -204,13 +216,17 @@
         })
             .then(res => res.json())
             .then(data => {
+                hideLoading(); // Hide loading after response
                 if (data.message) {
                     document.querySelector("#sale-items-table tbody").innerHTML = "";
                     document.getElementById("grand-total").textContent = "0.00";
                     focusBarcodeInput();
                 }
             })
-            .catch(err => console.error("Error confirming sale:", err));
+            .catch(err => {
+                hideLoading(); // Hide loading on error
+                console.error("Error confirming sale:", err);
+            });
     }
 
     document.addEventListener("DOMContentLoaded", function () {
@@ -218,23 +234,28 @@
     });
     
     function rejectSale() {
-        fetch("/sales/reject-sale", { method: "POST" })
+        showLoading(); // Show loading before request
+        fetch("/sales/reject-sale", { 
+            method: "POST" 
+        })
             .then(res => res.json())
             .then(data => {
+                hideLoading(); // Hide loading after response
                 if (data.message) {
                     document.querySelector("#sale-items-table tbody").innerHTML = "";
                     document.getElementById("grand-total").textContent = "0.00";
                     focusBarcodeInput();
                 }
             })
-            .catch(err => console.error("Error rejecting sale:", err));
+            .catch(err => {
+                hideLoading(); // Hide loading on error
+                console.error("Error rejecting sale:", err);
+            });
     }
-    
 </script>
 
 <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome-free-6.7.2-web/css/all.min.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap.min.css') }}">
 <script src="{{ url_for('static', filename='js/jquery.3.3.1.js') }}"></script>
 <script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
-
 {% endblock %}

@@ -167,6 +167,40 @@
                 padding-top: 0 !important;
             }
         }
+
+        #loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            backdrop-filter: blur(5px); /* Blurs the background */
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db; /* Blue spinner */
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+
+        .loading {
+            font-weight: bolder;
+            color: #f3f3f3;
+            font-size: larger;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -178,7 +212,7 @@
         <a href="{{ url_for('user_management') }}" class="nav-link"><i class="fas fa-users"></i><span>User Management</span></a>
         <a href="{{ url_for('add_product') }}" class="nav-link"><i class="fas fa-plus-circle"></i><span>Add Product</span></a>
         <a href="{{ url_for('view_products') }}" class="nav-link"><i class="fas fa-list"></i><span>View Products</span></a>
-        <a href="{{ url_for('add_stock') }}" class="nav-link"><i class="fas fa-boxes"></i><span>Add Stock</span></a>
+        <a href="{{ url_for('bulk_add_stock') }}" class="nav-link"><i class="fas fa-boxes"></i><span>Add Stock</span></a>
         <a href="{{ url_for('view_stock') }}" class="nav-link"><i class="fas fa-warehouse"></i><span>View Stock</span></a>
         <a href="{{ url_for('stock_history') }}" class="nav-link"><i class="fas fa-history"></i><span>Stock History</span></a>
         <a href="{{ url_for('sale_management') }}" class="nav-link"><i class="fas fa-shopping-cart"></i><span>Sale Management</span></a>
@@ -199,6 +233,10 @@
         <a href="{{ url_for('view_sales') }}" class="nav-link"><i class="fas fa-chart-line"></i><span>View Sales</span></a>
         <a href="{{ url_for('daily_report') }}" class="nav-link"><i class="fas fa-file-alt"></i><span>Daily Report</span></a>
         {% endif %}
+    </div>
+
+    <div id="loading-overlay" style="display: none;">
+        <div class="spinner"></div><h6 class="loading">Loading...</h6>
     </div>
 
     <!-- Main Content -->
@@ -272,6 +310,30 @@
             } else {
                 sidebar.classList.add('minimized');
             }
+        });
+
+        // Functions to show and hide the loading overlay
+        function showLoading() {
+            document.getElementById('loading-overlay').style.display = 'flex';
+        }
+    
+        function hideLoading() {
+            document.getElementById('loading-overlay').style.display = 'none';
+        }
+    
+        // Automatically show loading during AJAX requests (if you use jQuery)
+        $(document).ajaxStart(function() {
+            showLoading();
+        });
+        $(document).ajaxStop(function() {
+            hideLoading();
+        });
+    
+        // Show loading on form submissions
+        $(document).ready(function() {
+            $('form').on('submit', function() {
+                showLoading();
+            });
         });
     </script>
 </body>

@@ -87,7 +87,7 @@
 
     function updateStock(historyId) {
         const newQuantity = document.getElementById(`quantity-${historyId}`).value;
-
+        showLoading(); // Show loading before request
         fetch('/admin/edit-stock', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -95,17 +95,23 @@
         })
         .then(response => response.json())
         .then(data => {
+            hideLoading(); // Hide loading after response
             if (data.message) {
                 alert(data.message);
                 location.reload();
             } else {
                 alert(data.error || 'Failed to update stock.');
             }
+        })
+        .catch(err => {
+            hideLoading(); // Hide loading on error
+            console.error("Error updating stock:", err);
         });
     }
 
     function revokeStock(productId, historyId) {
         if (confirm("Are you sure you want to revoke this stock addition?")) {
+            showLoading(); // Show loading before request
             fetch(`/admin/revoke-stock`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -113,12 +119,17 @@
             })
             .then(response => response.json())
             .then(data => {
+                hideLoading(); // Hide loading after response
                 if (data.message) {
                     alert(data.message);
                     location.reload();
                 } else {
                     alert(data.error || 'Failed to revoke stock addition.');
                 }
+            })
+            .catch(err => {
+                hideLoading(); // Hide loading on error
+                console.error("Error revoking stock:", err);
             });
         }
     }

@@ -98,7 +98,7 @@
 
     function updateSale(saleId) {
         const newQuantity = document.getElementById(`quantity-${saleId}`).value;
-
+        showLoading(); // Show loading before request
         fetch('/sales/revoke', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -106,12 +106,17 @@
         })
         .then(response => response.json())
         .then(data => {
+            hideLoading(); // Hide loading after response
             if (data.message) {
                 alert(data.message);
                 location.reload();
             } else {
                 alert(data.error || 'Failed to update sale');
             }
+        })
+        .catch(err => {
+            hideLoading(); // Hide loading on error
+            console.error("Error updating sale:", err);
         });
     }
 
@@ -120,18 +125,24 @@
             return;
         }
 
+        showLoading(); // Show loading before request
         fetch(`/sales/delete/${saleId}`, {
             method: "DELETE",
             headers: { "Content-Type": "application/json" }
         })
         .then(res => res.json())
         .then(data => {
+            hideLoading(); // Hide loading after response
             if (data.message) {
                 alert(data.message);
                 location.reload();
             } else {
                 alert(data.error || "Failed to delete sale record.");
             }
+        })
+        .catch(err => {
+            hideLoading(); // Hide loading on error
+            console.error("Error deleting sale:", err);
         });
     }
 </script>
